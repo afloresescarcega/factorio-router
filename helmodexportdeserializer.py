@@ -31,7 +31,7 @@ def jsonify_json_string(json_as_str: str) -> dict:
     return json.loads(json_as_str)
 
 
-def convert_serpent_serialization_into_json_in_lua(replace):
+def convert_serpent_serialization_into_json_in_lua(replace: str) -> str:
     cmd = ['xargs', 'lua', 'deserialize_serpent_into_json.lua']
     result = subprocess.run(cmd, stdout=subprocess.PIPE, input=replace.encode('utf-8'), check=True)
     lua_output = result.stdout.decode('utf-8').strip()
@@ -39,20 +39,20 @@ def convert_serpent_serialization_into_json_in_lua(replace):
     return lua_output
 
 
-def remove_boolean_result_from_lua_output_and_white_space(lua_output):
+def remove_boolean_result_from_lua_output_and_white_space(lua_output: str) -> str:
     return re.sub(r"^true\s+", r'', lua_output)
 
 
-def escape_double_quotes(lua_serpent_serialized_table):
+def escape_double_quotes(lua_serpent_serialized_table: str) -> str:
     return remove_extraneous_lua_code_pre_and_post_fix(lua_serpent_serialized_table)\
         .replace('"', '\\"')
 
 
-def remove_extraneous_lua_code_pre_and_post_fix(lua_serpent_serialized_table):
+def remove_extraneous_lua_code_pre_and_post_fix(lua_serpent_serialized_table: str) -> str:
     return lua_serpent_serialized_table.replace('do local _=', '').replace(';return _;end', '')
 
 
-def aggregate_helmod_string_output_into_single_line():
+def aggregate_helmod_string_output_into_single_line() -> str:
     result = ""
     for i in range(1, len(sys.argv)):
         arg_i = sys.argv[i]
