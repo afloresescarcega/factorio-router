@@ -22,5 +22,5 @@ Then run this command
 - [ ] `cat input.txt | xargs python helmodexportdeserializer.py`
 
 ## setup with docker :)
-- [ ] docker-compose build main
+- [ ] docker-compose build factorio-router
 - [ ] docker-compose up
