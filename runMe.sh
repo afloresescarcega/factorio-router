@@ -1,1 +1,1 @@
-cat input.txt | xargs python helmodexportdeserializer.py
+cat input.txt | xargs python main.py

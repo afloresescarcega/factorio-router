@@ -5,7 +5,6 @@
 import json
 import re
 import subprocess
-import sys
 from base64 import b64decode
 from gzip import decompress
 
@@ -18,9 +17,9 @@ class HelmodExportDeserializer:
         return gzip_decompressed
 
 
-def get_deserialized_helmod_export_string_as_json() -> str:
-    result: str = aggregate_helmod_string_output_into_single_line()
-    lua_serpent_serialized_table: str = HelmodExportDeserializer.decode_base64_and_gunzip(result)
+def get_deserialized_helmod_export_string_as_json(helmod_export_string_in_serpent) -> str:
+    lua_serpent_serialized_table: str = HelmodExportDeserializer.decode_base64_and_gunzip(
+        helmod_export_string_in_serpent)
     cleaned_lua_serpent_serialized_table: str = escape_double_quotes(lua_serpent_serialized_table)
     lua_json_output: str = \
         convert_serpent_serialization_into_json_in_lua(cleaned_lua_serpent_serialized_table)
@@ -50,17 +49,3 @@ def escape_double_quotes(lua_serpent_serialized_table: str) -> str:
 
 def remove_extraneous_lua_code_pre_and_post_fix(lua_serpent_serialized_table: str) -> str:
     return lua_serpent_serialized_table.replace('do local _=', '').replace(';return _;end', '')
-
-
-def aggregate_helmod_string_output_into_single_line() -> str:
-    result = ""
-    for i in range(1, len(sys.argv)):
-        arg_i = sys.argv[i]
-        result += arg_i.strip()
-    return result
-
-
-if __name__ == '__main__':
-    deserialized_helmod_export_string_as_json: str = get_deserialized_helmod_export_string_as_json()
-    print(deserialized_helmod_export_string_as_json)
-    jsonify_json_string(deserialized_helmod_export_string_as_json)
