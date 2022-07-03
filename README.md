@@ -9,7 +9,18 @@ Export a "Production Line" in Helmod and copy to clipboard
 
 ![productionLineStringExport.png](resources/productionLineStringExport.png)
 
-## setup
+Then run this command
+`pbpaste | xargs python main.py` (or manually paste and pipe inputs into main.py)
+
+## setup without docker on mac
 - [ ] `source venv/bin/activate`
 - [ ] `pip3 install -r requirements.txt`
-- [ ] `python3 main.py`
+- [ ] `brew install lua`
+- [ ] `brew install luarocks`
+- [ ] `luarocks install serpent`
+- [ ] paste your contents into input.txt
+- [ ] `cat input.txt | xargs python main.py`
+
+## setup with docker :)
+- [ ] docker-compose build main
+- [ ] docker-compose up
