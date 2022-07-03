@@ -10,7 +10,7 @@ Export a "Production Line" in Helmod and copy to clipboard
 ![productionLineStringExport.png](resources/productionLineStringExport.png)
 
 Then run this command
-`pbpaste | xargs python main.py` (or manually paste and pipe inputs into main.py)
+`pbpaste | xargs python helmodexportdeserializer.py` (or manually paste and pipe inputs into helmodexportdeserializer.py)
 
 ## setup without docker on mac
 - [ ] `source venv/bin/activate`
@@ -19,7 +19,7 @@ Then run this command
 - [ ] `brew install luarocks`
 - [ ] `luarocks install serpent`
 - [ ] paste your contents into input.txt
-- [ ] `cat input.txt | xargs python main.py`
+- [ ] `cat input.txt | xargs python helmodexportdeserializer.py`
 
 ## setup with docker :)
 - [ ] docker-compose build main
