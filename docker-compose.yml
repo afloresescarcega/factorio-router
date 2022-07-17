@@ -1,2 +1,5 @@
-factorio-router:
-    build: .
+services:
+    helmod-decoder:
+      build: helmod-decoder/.
+    blueprints:
+      build: blueprints/.

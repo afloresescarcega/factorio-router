@@ -6,6 +6,6 @@ RUN apt-get update -y
 RUN apt-get install lua5.4 -y
 RUN apt-get install luarocks -y
 RUN luarocks install serpent
-COPY . .
+COPY .. .
 RUN chmod 777 runMe.sh
 CMD [ "sh", "-c", "./runMe.sh"]
