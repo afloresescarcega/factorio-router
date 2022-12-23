@@ -20,6 +20,83 @@ export function validate_io_orientations(entity: InstanceType<typeof Blueprint.e
     return true
 }
 
+export function add_single_assembler(blueprint: InstanceType<typeof Blueprint>, position:InstanceType<typeof Blueprint.position>, recipeName: string = "splitter") {
+    console.log("pos: " + position.x + " " + position.y);
+    let entity2 = blueprint.createEntity("underground-belt", { x: position.x + 0.5, y: position.y + 1.5 }, 6); // top splitter output
+    entity2.setDirectionType("output");
+    blueprint.createEntity("transport-belt", { x: position.x + 0.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 2.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 1.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 2.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("underground-belt", { x: position.x + 4.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("splitter", { x: position.x + 3.5, y: position.y + 0 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 4.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 6.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 6.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 8.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 8.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 9.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 10.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 9.5, y: position.y + 1.5 }, 6); // top left corner
+    blueprint.createEntity("splitter", { x: position.x + 10.5, y: position.y + 1 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 11.5, y: position.y + 0.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 11.5, y: position.y + 1.5 }, 6); // top left corner
+    let entity1 = blueprint.createEntity("underground-belt", { x: position.x + 0.5, y: position.y + 2.5 }, 6); // output middle line
+    entity1.setDirectionType("output");
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 3.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 2.5 }, 4); // top left corner
+    blueprint.createEntity("underground-belt", { x: position.x + 4.5, y: position.y + 2.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 2.5 }, 6); // top left corner
+    blueprint.createEntity("splitter", { x: position.x + 6.5, y: position.y + 2 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 3.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 3.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 8.5, y: position.y + 3.5 }, 6); // top left corner
+    let entity = blueprint.createEntity("underground-belt", { x: position.x + 8.5, y: position.y + 2.5 }, 6); // output bottom line
+    entity.setDirectionType("output");
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 2.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 9.5, y: position.y + 3.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 9.5, y: position.y + 2.5 }, 4); // top left corner
+    blueprint.createEntity("underground-belt", { x: position.x + 11.5, y: position.y + 2.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 5.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 4.5 }, 4); // top left corner
+    blueprint.createEntity("splitter", { x: position.x + 4.5, y: position.y + 4 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 4.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 5.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 4.5 }, 4); // top left corner
+    blueprint.createEntity("small-electric-pole", { x: position.x + 11.5, y: position.y + 5.5 }, 0); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 7.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 6.5 }, 4); // top left corner
+    blueprint.createEntity("inserter", { x: position.x + 4.5, y: position.y + 6.5 }, 0); // top left corner
+    blueprint.createEntity("small-electric-pole", { x: position.x + 6.5, y: position.y + 6.5 }, 0); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 7.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 6.5 }, 4); // top left corner
+    blueprint.createEntity("inserter", { x: position.x + 2.5, y: position.y + 8.5 }, 6); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 8.5 }, 4); // top left corner
+    blueprint.createEntity("inserter", { x: position.x + 6.5, y: position.y + 8.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 8.5 }, 4); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 0.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("small-electric-pole", { x: position.x + 2.5, y: position.y + 10.5 }, 0); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 2.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 1.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("inserter", { x: position.x + 4.5, y: position.y + 10.5 }, 0); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 4.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 3.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 6.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 5.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 8.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 7.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 10.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 9.5, y: position.y + 11.5 }, 2); // top left corner
+    blueprint.createEntity("transport-belt", { x: position.x + 11.5, y: position.y + 11.5 }, 2); // top left corner
+    let assembler = blueprint.createEntity("assembling-machine-1", { x: position.x + 3.5, y: position.y + 7.5 }, 0); // top left corner
+    assembler.setRecipe(recipeName);
+}
+
 export function add_inserters(entity: InstanceType<typeof Blueprint.entity>, blueprint: InstanceType<typeof Blueprint>, position:InstanceType<typeof Blueprint.position>, orientations?:string[]) {
     if (orientations) {
         validate_io_orientations(entity, orientations);
