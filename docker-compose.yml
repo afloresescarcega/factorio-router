@@ -1,5 +1,3 @@
 services:
-    helmod-decoder:
-      build: helmod-decoder/.
     blueprints:
       build: blueprints/.
