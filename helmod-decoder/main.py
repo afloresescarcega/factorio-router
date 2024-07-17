@@ -58,12 +58,15 @@ def create_blueprint_from_helmod(helmod_data):
 
 
 def parse_helmod_data(helmod_data):
-    # This is a simplified parser. You'll need to adapt it based on your actual Helmod JSON structure
     recipes = {}
-    for block in helmod_data.get('blocks', {}).values():
-        if 'recipes' in block:
-            for recipe in block['recipes'].values():
-                recipes[recipe['name']] = recipe['factory']['count']
+    for block_key, block_value in helmod_data.get('blocks', {}).items():
+        if isinstance(block_value, dict) and 'recipes' in block_value:
+            for recipe in block_value['recipes'].values():
+                if isinstance(recipe, dict) and 'name' in recipe and 'factory' in recipe:
+                    recipes[recipe['name']] = recipe['factory'].get('count', 1)
+        elif isinstance(block_value, dict) and 'name' in block_value:
+            # Handle the case where the recipe info is directly in the block
+            recipes[block_value['name']] = block_value.get('count', 1)
     return recipes
 
 
@@ -182,6 +185,7 @@ helmod_json = '''
 def main():
     helmod_data = json.loads(helmod_json)
     blueprint = create_blueprint_from_helmod(helmod_data)
+    print(blueprint)
     encoded_blueprint = encode_blueprint(blueprint)
     print("here's the new blueprint:")
     print(encoded_blueprint)
