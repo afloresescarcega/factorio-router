@@ -9,7 +9,8 @@ function parseHelmodData(helmodData) {
     function processBlock(block) {
         if (typeof block === 'object' && block !== null) {
             if (block.name && block.type === 'item') {
-                recipes[block.name] = Math.max(block.count || 1, 1);
+                const count = block.count !== undefined ? block.count : 1;
+                recipes[block.name] = Math.max(count, 1);
             }
             for (const [key, value] of Object.entries(block)) {
                 processBlock(value);
@@ -17,9 +18,14 @@ function parseHelmodData(helmodData) {
         }
     }
 
-    processBlock(helmodData);
+    if (helmodData) {
+        processBlock(helmodData);
+    } else {
+        console.warn("Helmod data is undefined or null");
+    }
 
     if (Object.keys(recipes).length === 0) {
+        console.warn("No recipes found, adding default recipe");
         recipes['iron-plate'] = 1;
     }
 
@@ -105,15 +111,20 @@ function createBlueprintFromHelmod(helmodData) {
 
 export function processHelmodString(helmodString) {
     console.log("Processing Helmod string:", helmodString);
-    const helmodData = HelmodFactory.decodeHelmod(helmodString);
-    const blueprint = createBlueprintFromHelmod(helmodData);
+    try {
+        const helmodData = HelmodFactory.decodeHelmod(helmodString);
+        const blueprint = createBlueprintFromHelmod(helmodData);
 
-    console.log("Final blueprint structure:");
-    console.log(JSON.stringify(blueprint, null, 2));
+        console.log("Final blueprint structure:");
+        console.log(JSON.stringify(blueprint, null, 2));
 
-    const encodedBlueprint = encodeBlueprint(blueprint);
-    console.log("Encoded blueprint:");
-    console.log(encodedBlueprint);
+        const encodedBlueprint = encodeBlueprint(blueprint);
+        console.log("Encoded blueprint:");
+        console.log(encodedBlueprint);
 
-    return encodedBlueprint;
+        return encodedBlueprint;
+    } catch (error) {
+        console.error("Error processing Helmod string:", error);
+        throw new Error(`Failed to process Helmod string: ${error.message}`);
+    }
 }
