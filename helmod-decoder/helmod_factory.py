@@ -119,22 +119,4 @@ class HelmodFactory:
 # Example usage
 if __name__ == "__main__":
     # Example Helmod string
-    helmod_string = """
-    H4sIAAAAAAAA/81UXY/aMBD8KyjPDkrg6LU6+U/c6+kUOc4SLPwlxz6KkP971yQhgUKF7ql5gV17Z8fj8TZmIQ1nclHRk2hopkwDslpnxBw0OJrtQApjd6YW
-    vAkNZKTG7fuOns6/VdlXDUFGNFNAMxa8UcwLo/OOC9Accsv4/jEoN0F7WhJrDrheEKFbBw1Weuz0kXFjLbjcSuYh+6SnvstVlvijxZzwoEa4gnQel+gqko9M
-    OCTTAnP5YQcgJ5TbhX8CRWKdaQLvaT065gX7oQ6Pe5TYwwEXFrDF+6qX932VoSQN/MZtTyH3CBP2wBq3o8hbxr1xxwvJrgNVS5Q8V4zvhIa8HHHwAoQ/TjiA
-    19ce6evrpkDCFqChxXJDpFAiLaN5gkzEI4HtFs4yDbsuFL4QEENudBeUPVPCRSNl6P9Hwpn9TtksWBY/br5yoF5545mcl46ZSGpgCD/K0kf3r2qQ4eVngR9m
-    VW3oC0EzVqO2SZVZXCXenmHx+q5YV9wi8QIZPEE5XlwRNF7gHhXzLsCNCQa0v8oJKqlYMkIdhGzQAJjrCQvoDX7PGp/PGOdKrzhqm8bGsyJj0aRQPB91NhPS
-    I+lMcLwXcDjiF7guGSArlr+W6834aMp+aFX4lMrhcaX/q9ljjpMY/6cCZHZHg/1u/N+mNEPquJ1xHlSQKbpwnVL3u+GQ7IzEOWiZng/IefJhoQemctAtSjCr
-    nGfvnzC+OfDB6UX1Brr5A4bXHxaNBgAA
-    """
-
-    # Decode
-    decoded_output = HelmodFactory.decode_helmod(helmod_string)
-    print("Decoded data:")
-    print(json.dumps(decoded_output, indent=2))
-
-    # Encode
-    re_encoded_input = HelmodFactory.encode_helmod(decoded_output)
-    print("\nRe-encoded string:")
-    print(re_encoded_input)
+    pass
