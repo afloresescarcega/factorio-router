@@ -1,5 +1,7 @@
+import json
 import sys
 from helmod_factory import HelmodFactory
+from blueprint_factory import encode_blueprint
 
 
 def read_input():
@@ -10,47 +12,180 @@ def read_input():
         with open('input.txt', 'r') as f:
             return f.read().strip()
 
-def process_helmod_data(helmod_data):
-    """Process the Helmod data and create a blueprint."""
-    # This is a placeholder function. You'll need to implement the logic
-    # to convert Helmod data into a Factorio blueprint structure.
-    # For now, we'll just create a simple blueprint with one assembling machine.
+
+def create_blueprint_from_helmod(helmod_data):
+    # Parse Helmod data
+    recipes = parse_helmod_data(helmod_data)
+
+    # Create blueprint structure
     blueprint = {
         "blueprint": {
             "icons": [
-                {"signal": {"type": "item", "name": "electronic-circuit"}, "index": 1}
+                {"signal": {"type": "item", "name": "assembling-machine-1"}, "index": 1}
             ],
-            "entities": [
-                {
-                    "entity_number": 1,
-                    "name": "assembling-machine-1",
-                    "position": {"x": 0, "y": 0}
-                }
-            ],
+            "entities": [],
             "item": "blueprint",
             "version": 281479275151360
         }
     }
+
+    # Place assemblers and inserters
+    entity_number = 1
+    for i, (recipe, count) in enumerate(recipes.items()):
+        x, y = i * 4, 0  # Simple grid layout
+        for _ in range(int(count)):
+            # Add assembler
+            blueprint["blueprint"]["entities"].append({
+                "entity_number": entity_number,
+                "name": "assembling-machine-1",
+                "position": {"x": x, "y": y},
+                "recipe": recipe
+            })
+            entity_number += 1
+
+            # Add inserters (simplified, just adding 4 around each assembler)
+            for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0)]:
+                blueprint["blueprint"]["entities"].append({
+                    "entity_number": entity_number,
+                    "name": "inserter",
+                    "position": {"x": x + dx, "y": y + dy}
+                })
+                entity_number += 1
+
+            y += 4  # Move to next row
+
     return blueprint
 
-def main():
-    # Read the Helmod export string
-    helmod_string = read_input()
 
-    # Decode the Helmod data
-    helmod_factory = HelmodFactory()
-    helmod_data = helmod_factory.decode_helmod(helmod_string)
-    print(helmod_data)
-    #
-    # # Process the Helmod data and create a blueprint
-    # blueprint_data = process_helmod_data(helmod_data)
-    #
-    # # Encode the blueprint
-    # encoded_blueprint = encode_blueprint(blueprint_data)
-    #
-    # # Print the encoded blueprint
-    # print("Encoded Blueprint:")
-    # print(encoded_blueprint)
+def parse_helmod_data(helmod_data):
+    # This is a simplified parser. You'll need to adapt it based on your actual Helmod JSON structure
+    recipes = {}
+    for block in helmod_data.get('blocks', {}).values():
+        if 'recipes' in block:
+            for recipe in block['recipes'].values():
+                recipes[recipe['name']] = recipe['factory']['count']
+    return recipes
+
+
+helmod_json = '''
+{
+  "id": "block_1",
+  "owner": "heliophobicdude",
+  "blocks": {
+    "block_1": {
+      "id": "block_1",
+      "name": "copper-plate",
+      "owner": "heliophobicdude",
+      "count": 0,
+      "power": 0,
+      "ingredients": {
+        "copper-plate": {
+          "name": "copper-plate",
+          "type": "item",
+          "count": 0,
+          "state": 2
+        },
+        "name": "copper-plate",
+        "type": "item",
+        "count": 0,
+        "state": 2
+      },
+      "copper-plate": {
+        "name": "copper-plate",
+        "type": "item",
+        "count": 0,
+        "state": 2
+      },
+      "type": "item",
+      "state": 2
+    },
+    "id": "block_1",
+    "name": "copper-plate",
+    "owner": "heliophobicdude",
+    "count": 0,
+    "power": 0,
+    "ingredients": {
+      "copper-plate": {
+        "name": "copper-plate",
+        "type": "item",
+        "count": 0,
+        "state": 2
+      },
+      "name": "copper-plate",
+      "type": "item",
+      "count": 0,
+      "state": 2
+    },
+    "copper-plate": {
+      "name": "copper-plate",
+      "type": "item",
+      "count": 0,
+      "state": 2
+    },
+    "type": "item",
+    "state": 2
+  },
+  "block_1": {
+    "id": "block_1",
+    "name": "copper-plate",
+    "owner": "heliophobicdude",
+    "count": 0,
+    "power": 0,
+    "ingredients": {
+      "copper-plate": {
+        "name": "copper-plate",
+        "type": "item",
+        "count": 0,
+        "state": 2
+      },
+      "name": "copper-plate",
+      "type": "item",
+      "count": 0,
+      "state": 2
+    },
+    "copper-plate": {
+      "name": "copper-plate",
+      "type": "item",
+      "count": 0,
+      "state": 2
+    },
+    "type": "item",
+    "state": 2
+  },
+  "name": "copper-plate",
+  "count": 0,
+  "power": 0,
+  "ingredients": {
+    "copper-plate": {
+      "name": "copper-plate",
+      "type": "item",
+      "count": 0,
+      "state": 2
+    },
+    "name": "copper-plate",
+    "type": "item",
+    "count": 0,
+    "state": 2
+  },
+  "copper-plate": {
+    "name": "copper-plate",
+    "type": "item",
+    "count": 0,
+    "state": 2
+  },
+  "type": "item",
+  "state": 2
+}
+'''
+
+
+def main():
+    helmod_data = json.loads(helmod_json)
+    blueprint = create_blueprint_from_helmod(helmod_data)
+    encoded_blueprint = encode_blueprint(blueprint)
+    print("here's the new blueprint:")
+    print(encoded_blueprint)
+
 
 if __name__ == "__main__":
     main()
