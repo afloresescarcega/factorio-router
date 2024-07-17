@@ -9,8 +9,13 @@ function parseHelmodData(helmodData) {
     function processBlock(block) {
         if (typeof block === 'object' && block !== null) {
             if (block.name && block.type === 'item') {
-                const count = block.count !== undefined ? block.count : 1;
-                recipes[block.name] = Math.max(count, 1);
+                const count = block.count !== undefined ? parseFloat(block.count) : 1;
+                if (isNaN(count)) {
+                    console.warn(`Invalid count for ${block.name}, using 1`);
+                    recipes[block.name] = 1;
+                } else {
+                    recipes[block.name] = Math.max(count, 1);
+                }
             }
             for (const [key, value] of Object.entries(block)) {
                 processBlock(value);
@@ -113,18 +118,23 @@ export function processHelmodString(helmodString) {
     console.log("Processing Helmod string:", helmodString);
     try {
         const helmodData = HelmodFactory.decodeHelmod(helmodString);
-        const blueprint = createBlueprintFromHelmod(helmodData);
+        console.log("Decoded Helmod data:", JSON.stringify(helmodData, null, 2));
 
-        console.log("Final blueprint structure:");
-        console.log(JSON.stringify(blueprint, null, 2));
+        const blueprint = createBlueprintFromHelmod(helmodData);
+        console.log("Created blueprint:", JSON.stringify(blueprint, null, 2));
 
         const encodedBlueprint = encodeBlueprint(blueprint);
-        console.log("Encoded blueprint:");
-        console.log(encodedBlueprint);
+        console.log("Encoded blueprint:", encodedBlueprint);
 
         return encodedBlueprint;
     } catch (error) {
         console.error("Error processing Helmod string:", error);
-        throw new Error(`Failed to process Helmod string: ${error.message}`);
+        if (error instanceof SyntaxError) {
+            throw new Error(`Invalid Helmod string format: ${error.message}`);
+        } else if (error.message.includes('atob')) {
+            throw new Error('Invalid base64 encoding in Helmod string');
+        } else {
+            throw new Error(`Failed to process Helmod string: ${error.message}`);
+        }
     }
 }
