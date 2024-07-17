@@ -20,12 +20,16 @@ def parse_helmod_data(helmod_data):
 
     def process_block(block):
         if isinstance(block, dict):
-            if 'name' in block and 'count' in block:
-                recipes[block['name']] = max(block['count'], 1)  # Ensure at least 1
+            if 'name' in block and 'type' in block and block['type'] == 'item':
+                recipes[block['name']] = max(block.get('count', 1), 1)  # Ensure at least 1
             for key, value in block.items():
                 process_block(value)
 
     process_block(helmod_data)
+
+    if not recipes:
+        # If no recipes were found, add a default recipe
+        recipes['iron-plate'] = 1
 
     print("Extracted recipes:")
     print(json.dumps(recipes, indent=2))
@@ -47,10 +51,11 @@ def create_blueprint_from_helmod(helmod_data):
 
     print("Creating blueprint:")
     entity_number = 1
-    for i, (recipe, count) in enumerate(recipes.items()):
+    x, y = 0, 0
+    for recipe, count in recipes.items():
         print(f"Adding recipe: {recipe} (count: {count})")
-        x, y = i * 6, 0
         for _ in range(max(int(count), 1)):  # Ensure at least one entity is created
+            # Add assembling machine
             blueprint["blueprint"]["entities"].append({
                 "entity_number": entity_number,
                 "name": "assembling-machine-1",
@@ -59,6 +64,7 @@ def create_blueprint_from_helmod(helmod_data):
             })
             entity_number += 1
 
+            # Add inserters
             inserter_positions = [
                 (x - 1, y, 2),
                 (x + 1, y, 6),
@@ -75,7 +81,26 @@ def create_blueprint_from_helmod(helmod_data):
                 })
                 entity_number += 1
 
+            # Add transport belts
+            belt_positions = [
+                (x - 2, y, 2),
+                (x + 2, y, 6),
+                (x, y - 2, 0),
+                (x, y + 2, 4),
+            ]
+
+            for bx, by, direction in belt_positions:
+                blueprint["blueprint"]["entities"].append({
+                    "entity_number": entity_number,
+                    "name": "transport-belt",
+                    "position": {"x": bx, "y": by},
+                    "direction": direction
+                })
+                entity_number += 1
+
             y += 6
+        x += 6
+        y = 0
 
     print(f"Total entities added: {len(blueprint['blueprint']['entities'])}")
     return blueprint
@@ -193,7 +218,8 @@ helmod_json = '''
 
 
 def main():
-    helmod_data = json.loads(helmod_json)
+    helmod_string = read_input()
+    helmod_data = HelmodFactory.decode_helmod(helmod_string)
     blueprint = create_blueprint_from_helmod(helmod_data)
 
     print("Final blueprint structure:")
