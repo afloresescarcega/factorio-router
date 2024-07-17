@@ -104,6 +104,7 @@ function createBlueprintFromHelmod(helmodData) {
 }
 
 export function processHelmodString(helmodString) {
+    console.log("Processing Helmod string:", helmodString);
     const helmodData = HelmodFactory.decodeHelmod(helmodString);
     const blueprint = createBlueprintFromHelmod(helmodData);
 
