@@ -13,11 +13,27 @@ def read_input():
             return f.read().strip()
 
 
+def parse_helmod_data(helmod_data):
+    recipes = {}
+    print("Parsing Helmod data:")
+    print(json.dumps(helmod_data, indent=2))
+
+    def process_block(block):
+        if isinstance(block, dict):
+            if 'name' in block and 'count' in block:
+                recipes[block['name']] = max(block['count'], 1)  # Ensure at least 1
+            for key, value in block.items():
+                process_block(value)
+
+    process_block(helmod_data)
+
+    print("Extracted recipes:")
+    print(json.dumps(recipes, indent=2))
+    return recipes
+
 def create_blueprint_from_helmod(helmod_data):
-    # Parse Helmod data
     recipes = parse_helmod_data(helmod_data)
 
-    # Create blueprint structure
     blueprint = {
         "blueprint": {
             "icons": [
@@ -29,12 +45,12 @@ def create_blueprint_from_helmod(helmod_data):
         }
     }
 
-    # Place assemblers and inserters
+    print("Creating blueprint:")
     entity_number = 1
     for i, (recipe, count) in enumerate(recipes.items()):
-        x, y = i * 4, 0  # Simple grid layout
-        for _ in range(int(count)):
-            # Add assembler
+        print(f"Adding recipe: {recipe} (count: {count})")
+        x, y = i * 6, 0
+        for _ in range(max(int(count), 1)):  # Ensure at least one entity is created
             blueprint["blueprint"]["entities"].append({
                 "entity_number": entity_number,
                 "name": "assembling-machine-1",
@@ -43,32 +59,26 @@ def create_blueprint_from_helmod(helmod_data):
             })
             entity_number += 1
 
-            # Add inserters (simplified, just adding 4 around each assembler)
-            for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0)]:
+            inserter_positions = [
+                (x - 1, y, 2),
+                (x + 1, y, 6),
+                (x, y - 1, 0),
+                (x, y + 1, 4),
+            ]
+
+            for ix, iy, direction in inserter_positions:
                 blueprint["blueprint"]["entities"].append({
                     "entity_number": entity_number,
                     "name": "inserter",
-                    "position": {"x": x + dx, "y": y + dy}
+                    "position": {"x": ix, "y": iy},
+                    "direction": direction
                 })
                 entity_number += 1
 
-            y += 4  # Move to next row
+            y += 6
 
+    print(f"Total entities added: {len(blueprint['blueprint']['entities'])}")
     return blueprint
-
-
-def parse_helmod_data(helmod_data):
-    recipes = {}
-    for block_key, block_value in helmod_data.get('blocks', {}).items():
-        if isinstance(block_value, dict) and 'recipes' in block_value:
-            for recipe in block_value['recipes'].values():
-                if isinstance(recipe, dict) and 'name' in recipe and 'factory' in recipe:
-                    recipes[recipe['name']] = recipe['factory'].get('count', 1)
-        elif isinstance(block_value, dict) and 'name' in block_value:
-            # Handle the case where the recipe info is directly in the block
-            recipes[block_value['name']] = block_value.get('count', 1)
-    return recipes
-
 
 helmod_json = '''
 {
@@ -185,10 +195,14 @@ helmod_json = '''
 def main():
     helmod_data = json.loads(helmod_json)
     blueprint = create_blueprint_from_helmod(helmod_data)
-    print(blueprint)
+
+    print("Final blueprint structure:")
+    print(json.dumps(blueprint, indent=2))
+
     encoded_blueprint = encode_blueprint(blueprint)
-    print("here's the new blueprint:")
+    print("Encoded blueprint:")
     print(encoded_blueprint)
+
 
 
 if __name__ == "__main__":
