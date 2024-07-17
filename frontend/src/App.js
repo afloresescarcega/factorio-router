@@ -4,11 +4,19 @@ import { processHelmodString } from './main';
 function App() {
   const [helmodString, setHelmodString] = useState('');
   const [blueprintString, setBlueprintString] = useState('');
+  const [error, setError] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const result = processHelmodString(helmodString);
-    setBlueprintString(result);
+    setError('');
+    setBlueprintString('');
+    try {
+      const result = processHelmodString(helmodString);
+      setBlueprintString(result);
+    } catch (err) {
+      console.error('Error processing Helmod string:', err);
+      setError(`Error: ${err.message}`);
+    }
   };
 
   return (
@@ -18,13 +26,18 @@ function App() {
         <textarea
           value={helmodString}
           onChange={(e) => setHelmodString(e.target.value)}
-          placeholder="Enter Helmod string here"
+          placeholder="Enter Helmod string here (multiline input is supported)"
           rows={10}
           cols={50}
         />
         <br />
         <button type="submit">Convert</button>
       </form>
+      {error && (
+        <div style={{ color: 'red', marginTop: '10px' }}>
+          {error}
+        </div>
+      )}
       {blueprintString && (
         <div>
           <h2>Blueprint String:</h2>
