@@ -2,115 +2,104 @@ import { HelmodFactory } from './helmodFactory.js';
 import { encodeBlueprint } from './blueprintFactory.js';
 
 function parseHelmodData(helmodData) {
-    const recipes = {};
-    console.log("Parsing Helmod data:");
-    console.log(JSON.stringify(helmodData, null, 2));
+    // Helmod nests recipe entries (type "recipe") that carry the factory that
+    // crafts them and how many of that factory the production line needs.
+    const productionUnits = [];
 
-    function processBlock(block) {
-        if (typeof block === 'object' && block !== null) {
-            if (block.name && block.type === 'item') {
-                const count = block.count !== undefined ? parseFloat(block.count) : 1;
-                if (isNaN(count)) {
-                    console.warn(`Invalid count for ${block.name}, using 1`);
-                    recipes[block.name] = 1;
-                } else {
-                    recipes[block.name] = Math.max(count, 1);
-                }
-            }
-            for (const value of Object.values(block)) {
-                processBlock(value);
-            }
+    function walk(node) {
+        if (typeof node !== 'object' || node === null) return;
+        if (node.type === 'recipe' && node.name && node.factory && node.factory.name) {
+            const rawCount = parseFloat(node.factory.count);
+            productionUnits.push({
+                recipe: node.name,
+                factory: node.factory.name,
+                count: Math.max(1, Math.ceil(isNaN(rawCount) ? 1 : rawCount)),
+            });
+        }
+        for (const value of Object.values(node)) {
+            walk(value);
         }
     }
 
-    if (helmodData) {
-        processBlock(helmodData);
-    } else {
-        console.warn("Helmod data is undefined or null");
+    walk(helmodData);
+
+    if (productionUnits.length === 0) {
+        throw new Error("No recipes with factories found in the Helmod data");
     }
 
-    if (Object.keys(recipes).length === 0) {
-        console.warn("No recipes found, adding default recipe");
-        recipes['iron-plate'] = 1;
-    }
+    console.log("Extracted production units:");
+    console.log(JSON.stringify(productionUnits, null, 2));
+    return productionUnits;
+}
 
-    console.log("Extracted recipes:");
-    console.log(JSON.stringify(recipes, null, 2));
-    return recipes;
+// Furnaces and mining drills pick their recipe from what they're fed, and
+// setting one in a blueprint is invalid.
+function acceptsRecipe(factoryName) {
+    return !/furnace|mining-drill|pumpjack/.test(factoryName);
 }
 
 function createBlueprintFromHelmod(helmodData) {
-    const recipes = parseHelmodData(helmodData);
+    const productionUnits = parseHelmodData(helmodData);
 
     const blueprint = {
         blueprint: {
             icons: [
-                {signal: {type: "item", name: "assembling-machine-1"}, index: 1}
+                {signal: {type: "item", name: productionUnits[0].factory}, index: 1}
             ],
             entities: [],
             item: "blueprint",
+            label: "Helmod: " + productionUnits.map(u => u.recipe).join(', '),
             version: 281479275151360
         }
     };
 
-    console.log("Creating blueprint:");
+    const entities = blueprint.blueprint.entities;
     let entityNumber = 1;
-    let x = 0, y = 0;
-    for (const [recipe, count] of Object.entries(recipes)) {
-        console.log(`Adding recipe: ${recipe} (count: ${count})`);
-        for (let i = 0; i < Math.max(parseInt(count), 1); i++) {
-            // Add assembling machine
-            blueprint.blueprint.entities.push({
-                entity_number: entityNumber,
-                name: "assembling-machine-1",
+    const add = (entity) => entities.push({entity_number: entityNumber++, ...entity});
+
+    // One column per recipe. Machines are 3x3 centered on (x, y); items flow
+    // west -> east: input belt line, input inserter, machine, output inserter,
+    // output belt line. Inserter direction in the blueprint format points at
+    // the tile the inserter picks up FROM.
+    const COLUMN_SPACING = 8; // input belt of col N is 2 east of output belt of col N-1
+    const ROW_SPACING = 4;
+
+    let x = 0;
+    for (const unit of productionUnits) {
+        console.log(`Adding ${unit.count}x ${unit.factory} for recipe ${unit.recipe}`);
+        let y = 0;
+        for (let i = 0; i < unit.count; i++) {
+            const machine = {
+                name: unit.factory,
                 position: {x, y},
-                recipe: recipe
-            });
-            entityNumber++;
-
-            // Add inserters
-            const inserterPositions = [
-                {x: x - 1, y: y, direction: 2},
-                {x: x + 1, y: y, direction: 6},
-                {x: x, y: y - 1, direction: 0},
-                {x: x, y: y + 1, direction: 4},
-            ];
-
-            for (const pos of inserterPositions) {
-                blueprint.blueprint.entities.push({
-                    entity_number: entityNumber,
-                    name: "inserter",
-                    position: {x: pos.x, y: pos.y},
-                    direction: pos.direction
-                });
-                entityNumber++;
+            };
+            if (acceptsRecipe(unit.factory)) {
+                machine.recipe = unit.recipe;
             }
+            add(machine);
 
-            // Add transport belts
-            const beltPositions = [
-                {x: x - 2, y: y, direction: 2},
-                {x: x + 2, y: y, direction: 6},
-                {x: x, y: y - 2, direction: 0},
-                {x: x, y: y + 2, direction: 4},
-            ];
+            // Input inserter: picks up from the west belt, drops into machine
+            add({name: "inserter", position: {x: x - 2, y}, direction: 6});
+            // Output inserter: picks up from the machine, drops on the east belt
+            add({name: "inserter", position: {x: x + 2, y}, direction: 6});
+            // Power: medium pole at the machine's NW corner reaches the whole
+            // machine and the next pole in the column
+            add({name: "medium-electric-pole", position: {x: x - 2, y: y - 2}});
 
-            for (const pos of beltPositions) {
-                blueprint.blueprint.entities.push({
-                    entity_number: entityNumber,
-                    name: "transport-belt",
-                    position: {x: pos.x, y: pos.y},
-                    direction: pos.direction
-                });
-                entityNumber++;
-            }
-
-            y += 6;
+            y += ROW_SPACING;
         }
-        x += 6;
-        y = 0;
+
+        // Continuous belt lines flowing south along both sides of the column
+        const columnHeight = (unit.count - 1) * ROW_SPACING;
+        for (let beltY = -2; beltY <= columnHeight + 1; beltY++) {
+            add({name: "transport-belt", position: {x: x - 3, y: beltY}, direction: 4});
+            add({name: "transport-belt", position: {x: x + 3, y: beltY}, direction: 4});
+        }
+
+        x += COLUMN_SPACING;
     }
 
-    console.log(`Total entities added: ${blueprint.blueprint.entities.length}`);
+    console.log(`Total entities added: ${entities.length}`);
     return blueprint;
 }
 

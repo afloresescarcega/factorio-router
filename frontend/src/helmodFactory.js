@@ -21,77 +21,87 @@ export class HelmodFactory {
     }
 
     static luaToPython(luaString) {
-        function parseValue(s, i) {
-            s = s.slice(i).trim();
-            if (s.startsWith('{')) {
-                return parseTable(s);
-            } else if (s.startsWith('"') || s.startsWith("'")) {
-                const end = s.indexOf(s[0], 1);
-                return [s.slice(1, end), end + 1];
-            } else if (s.startsWith('true')) {
-                return [true, 4];
-            } else if (s.startsWith('false')) {
-                return [false, 5];
-            } else if (s.startsWith('nil')) {
-                return [null, 3];
-            } else {
-                const match = s.match(/^-?\d+(?:\.\d+)?/);
-                if (match) {
-                    return [match[0].includes('.') ? parseFloat(match[0]) : parseInt(match[0]), match[0].length];
-                } else {
-                    const match = s.match(/^[a-zA-Z_][a-zA-Z0-9_]*/);
-                    if (match) {
-                        return [match[0], match[0].length];
-                    }
-                    throw new Error(`Unable to parse: ${s}`);
-                }
-            }
+        // Recursive-descent parser over a single cursor position so nested
+        // tables consume the correct number of characters.
+        const s = luaString;
+        let i = 0;
+
+        function skipWhitespace() {
+            while (i < s.length && /\s/.test(s[i])) i++;
         }
 
-        function parseTable(s) {
+        function parseValue() {
+            skipWhitespace();
+            if (s[i] === '{') {
+                return parseTable();
+            }
+            if (s[i] === '"' || s[i] === "'") {
+                const quote = s[i];
+                const end = s.indexOf(quote, i + 1);
+                if (end === -1) throw new Error(`Unterminated string at ${i}`);
+                const value = s.slice(i + 1, end);
+                i = end + 1;
+                return value;
+            }
+            if (s.startsWith('true', i)) { i += 4; return true; }
+            if (s.startsWith('false', i)) { i += 5; return false; }
+            if (s.startsWith('nil', i)) { i += 3; return null; }
+
+            const rest = s.slice(i);
+            let match = rest.match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+            if (match) {
+                i += match[0].length;
+                return /[.eE]/.test(match[0]) ? parseFloat(match[0]) : parseInt(match[0], 10);
+            }
+            match = rest.match(/^[a-zA-Z_][a-zA-Z0-9_]*/);
+            if (match) {
+                i += match[0].length;
+                return match[0];
+            }
+            throw new Error(`Unable to parse at ${i}: ${rest.slice(0, 60)}`);
+        }
+
+        function parseTable() {
+            i++; // consume '{'
             const result = {};
-            s = s.slice(1).trim();
-            while (s && !s.startsWith('}')) {
-                let key, end;
-                if (s.startsWith('[')) {
-                    end = s.indexOf(']');
-                    key = s.slice(1, end).trim();
+            let arrayIndex = 1;
+            skipWhitespace();
+            while (i < s.length && s[i] !== '}') {
+                if (s[i] === '[') {
+                    const end = s.indexOf(']', i);
+                    if (end === -1) throw new Error(`Unterminated '[' key at ${i}`);
+                    let key = s.slice(i + 1, end).trim();
                     if (key.startsWith('"') || key.startsWith("'")) {
                         key = key.slice(1, -1);
                     }
-                    s = s.slice(end + 1).trim();
+                    i = end + 1;
+                    skipWhitespace();
+                    if (s[i] !== '=') throw new Error(`Expected '=' after key at ${i}`);
+                    i++;
+                    result[key] = parseValue();
                 } else {
-                    [key, end] = parseValue(s, 0);
-                    s = s.slice(end).trim();
+                    const value = parseValue();
+                    skipWhitespace();
+                    if (s[i] === '=') {
+                        i++;
+                        result[value] = parseValue();
+                    } else {
+                        // Bare value: Lua array-style entry
+                        result[arrayIndex++] = value;
+                    }
                 }
-
-                if (!s.startsWith('=')) {
-                    throw new Error(`Expected '=' after key, found: ${s}`);
-                }
-                s = s.slice(1).trim();
-
-                let value;
-                [value, end] = parseValue(s, 0);
-                s = s.slice(end).trim();
-
-                result[key] = value;
-
-                if (s.startsWith(',')) {
-                    s = s.slice(1).trim();
-                } else if (!s.startsWith('}')) {
-                    if (s) continue;
-                    throw new Error(`Expected ',' or '}', found: ${s}`);
+                skipWhitespace();
+                if (s[i] === ',') {
+                    i++;
+                    skipWhitespace();
                 }
             }
-
-            if (!s.startsWith('}')) {
-                throw new Error(`Expected '}', found: ${s}`);
-            }
-
-            return [result, s.length - s.trimLeft().length];
+            if (s[i] !== '}') throw new Error(`Expected '}' at ${i}`);
+            i++;
+            return result;
         }
 
-        return parseValue(luaString, 0)[0];
+        return parseValue();
     }
 
     static pythonToLua(data) {

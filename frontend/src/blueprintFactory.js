@@ -1,7 +1,5 @@
 import pako from 'pako';
 
-const VERSION_BYTE = new Uint8Array([0]);
-
 export function decodeBlueprint(encodedBlueprint) {
     encodedBlueprint = encodedBlueprint.slice(1);
     const compressedData = atob(encodedBlueprint);
@@ -18,7 +16,11 @@ export function decodeBlueprint(encodedBlueprint) {
 export function encodeBlueprint(blueprint) {
     const jsonStr = JSON.stringify(blueprint);
     const compressedData = pako.deflate(jsonStr, { level: 9 });
-    const base64Encoded = btoa(String.fromCharCode.apply(null, compressedData));
-    const encodedBlueprint = new Uint8Array([...VERSION_BYTE, ...new TextEncoder().encode(base64Encoded)]);
-    return '0' + new TextDecoder().decode(encodedBlueprint);
+    // Chunked to avoid blowing the argument limit on large blueprints
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < compressedData.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, compressedData.subarray(i, i + CHUNK));
+    }
+    return '0' + btoa(binary);
 }
