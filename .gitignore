@@ -160,3 +160,4 @@ cython_debug/
 .idea/
 /blueprints/cov_profile/
 /blueprints/cov_profile.lcov
+.aider*

@@ -17,7 +17,7 @@ function parseHelmodData(helmodData) {
                     recipes[block.name] = Math.max(count, 1);
                 }
             }
-            for (const [key, value] of Object.entries(block)) {
+            for (const value of Object.values(block)) {
                 processBlock(value);
             }
         }
