@@ -63,40 +63,46 @@ function createBlueprintFromHelmod(helmodData) {
     // the tile the inserter picks up FROM.
     const COLUMN_SPACING = 8; // input belt of col N is 2 east of output belt of col N-1
     const ROW_SPACING = 4;
+    const MAX_PER_COLUMN = 15; // wrap tall recipes into multiple columns
 
     let x = 0;
     for (const unit of productionUnits) {
         console.log(`Adding ${unit.count}x ${unit.factory} for recipe ${unit.recipe}`);
-        let y = 0;
-        for (let i = 0; i < unit.count; i++) {
-            const machine = {
-                name: unit.factory,
-                position: {x, y},
-            };
-            if (acceptsRecipe(unit.factory)) {
-                machine.recipe = unit.recipe;
+        let remaining = unit.count;
+        while (remaining > 0) {
+            const inColumn = Math.min(remaining, MAX_PER_COLUMN);
+            let y = 0;
+            for (let i = 0; i < inColumn; i++) {
+                const machine = {
+                    name: unit.factory,
+                    position: {x, y},
+                };
+                if (acceptsRecipe(unit.factory)) {
+                    machine.recipe = unit.recipe;
+                }
+                add(machine);
+
+                // Input inserter: picks up from the west belt, drops into machine
+                add({name: "inserter", position: {x: x - 2, y}, direction: 6});
+                // Output inserter: picks up from the machine, drops on the east belt
+                add({name: "inserter", position: {x: x + 2, y}, direction: 6});
+                // Power: medium pole at the machine's NW corner reaches the whole
+                // machine and the next pole in the column
+                add({name: "medium-electric-pole", position: {x: x - 2, y: y - 2}});
+
+                y += ROW_SPACING;
             }
-            add(machine);
 
-            // Input inserter: picks up from the west belt, drops into machine
-            add({name: "inserter", position: {x: x - 2, y}, direction: 6});
-            // Output inserter: picks up from the machine, drops on the east belt
-            add({name: "inserter", position: {x: x + 2, y}, direction: 6});
-            // Power: medium pole at the machine's NW corner reaches the whole
-            // machine and the next pole in the column
-            add({name: "medium-electric-pole", position: {x: x - 2, y: y - 2}});
+            // Continuous belt lines flowing south along both sides of the column
+            const columnHeight = (inColumn - 1) * ROW_SPACING;
+            for (let beltY = -2; beltY <= columnHeight + 1; beltY++) {
+                add({name: "transport-belt", position: {x: x - 3, y: beltY}, direction: 4});
+                add({name: "transport-belt", position: {x: x + 3, y: beltY}, direction: 4});
+            }
 
-            y += ROW_SPACING;
+            x += COLUMN_SPACING;
+            remaining -= inColumn;
         }
-
-        // Continuous belt lines flowing south along both sides of the column
-        const columnHeight = (unit.count - 1) * ROW_SPACING;
-        for (let beltY = -2; beltY <= columnHeight + 1; beltY++) {
-            add({name: "transport-belt", position: {x: x - 3, y: beltY}, direction: 4});
-            add({name: "transport-belt", position: {x: x + 3, y: beltY}, direction: 4});
-        }
-
-        x += COLUMN_SPACING;
     }
 
     console.log(`Total entities added: ${entities.length}`);
