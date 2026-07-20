@@ -28,4 +28,13 @@ if (debug) {
     process.stderr.write(JSON.stringify(decodeBlueprint(blueprintString), null, 2) + '\n');
 }
 
+const { validateBlueprintString } = await import('./validator/validate.mjs');
+const result = validateBlueprintString(blueprintString);
+if (!result.ok) {
+    process.stderr.write('Blueprint failed validation:\n');
+    for (const err of result.errors) process.stderr.write(`  - ${err}\n`);
+    process.exit(1);
+}
+process.stderr.write('Blueprint passed schema + name validation.\n');
+
 process.stdout.write(blueprintString + '\n');

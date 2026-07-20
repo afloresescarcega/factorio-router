@@ -161,3 +161,4 @@ cython_debug/
 /blueprints/cov_profile/
 /blueprints/cov_profile.lcov
 .aider*
+/blueprint-output.txt
