@@ -268,6 +268,16 @@ function createBlueprintFromHelmod(helmodData) {
                 belt(bx, bus.row, direction);
             }
         }
+        if (flowsEast) {
+            // Label the feed point so a human knows what this lane takes
+            add({
+                name: "constant-combinator",
+                position: {x: from - 1, y: bus.row},
+                control_behavior: {
+                    filters: [{signal: {type: "item", name: bus.item}, count: 1, index: 1}]
+                }
+            });
+        }
         console.log(`Bus for ${bus.item} on row ${bus.row}, ` +
             `${flowsEast ? 'east from external input' : 'west from ' + bus.producers.length + ' producer columns'}, ` +
             `${bus.consumers.length} taps`);
