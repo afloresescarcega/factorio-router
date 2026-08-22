@@ -24,7 +24,7 @@ jobs:
       - name: Run Python tests with coverage
         working-directory: helmod-decoder
         run: |
-          pip install -r requirements-dev.txt
+          pip install --only-binary :all: --require-hashes -r requirements-dev.txt
           python -m pytest --cov=. --cov-report=xml tests/
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -36,7 +36,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci --ignore-scripts
-          CI=true npx react-scripts test --coverage --watchAll=false
+          CI=true npm test -- --coverage --watchAll=false
           mkdir -p coverage-node
           node --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage-node/lcov.info --test cli.test.mjs validator/validate.test.mjs
 

@@ -12,7 +12,9 @@ class TestEncodeBlueprint:
 
     def test_encode_is_deterministic_for_same_input(self):
         blueprint = {"blueprint": {"item": "blueprint", "entities": [{"a": 1}]}}
-        assert encode_blueprint(blueprint) == encode_blueprint(blueprint)
+        first_encoding = encode_blueprint(blueprint)
+        second_encoding = encode_blueprint(blueprint)
+        assert first_encoding == second_encoding
 
 
 class TestDecodeBlueprint:
