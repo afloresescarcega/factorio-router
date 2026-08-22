@@ -97,11 +97,8 @@ class HelmodFactory:
         if isinstance(data, dict):
             items = []
             for k, v in data.items():
-                if isinstance(k, str):
-                    if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', k):
-                        k = k  # Keep valid Lua identifiers unquoted
-                    else:
-                        k = f'["{k}"]'
+                if isinstance(k, str) and not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', k):
+                    k = f'["{k}"]'
                 items.append(f"{k}={HelmodFactory.python_to_lua(v)}")
             return '{' + ','.join(items) + '}'
         elif isinstance(data, list):
