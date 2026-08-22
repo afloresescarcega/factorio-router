@@ -6,7 +6,7 @@ export class HelmodFactory {
         const decodedData = atob(encodedString);
         const uint8Array = new Uint8Array(decodedData.length);
         for (let i = 0; i < decodedData.length; i++) {
-            uint8Array[i] = decodedData.charCodeAt(i);
+            uint8Array[i] = decodedData.codePointAt(i);
         }
         const decompressedData = pako.inflate(uint8Array, { to: 'string' });
         const luaTable = decompressedData.replace('do local _=', '').replace(';return _;end', '');
@@ -17,7 +17,7 @@ export class HelmodFactory {
         const luaString = HelmodFactory.pythonToLua(data);
         const wrappedLua = `do local _=${luaString};return _;end`;
         const compressedData = pako.deflate(wrappedLua);
-        return btoa(String.fromCharCode.apply(null, compressedData));
+        return btoa(String.fromCodePoint(...compressedData));
     }
 
     static luaToPython(luaString) {
@@ -51,14 +51,46 @@ export class HelmodFactory {
             let match = rest.match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
             if (match) {
                 i += match[0].length;
-                return /[.eE]/.test(match[0]) ? parseFloat(match[0]) : parseInt(match[0], 10);
+                return /[.eE]/.test(match[0]) ? Number.parseFloat(match[0]) : Number.parseInt(match[0], 10);
             }
-            match = rest.match(/^[a-zA-Z_][a-zA-Z0-9_]*/);
+            match = rest.match(/^[a-zA-Z_]\w*/);
             if (match) {
                 i += match[0].length;
                 return match[0];
             }
             throw new Error(`Unable to parse at ${i}: ${rest.slice(0, 60)}`);
+        }
+
+        function parseBracketKey() {
+            const end = s.indexOf(']', i);
+            if (end === -1) throw new Error(`Unterminated '[' key at ${i}`);
+            let key = s.slice(i + 1, end).trim();
+            if (key.startsWith('"') || key.startsWith("'")) {
+                key = key.slice(1, -1);
+            }
+            i = end + 1;
+            skipWhitespace();
+            if (s[i] !== '=') throw new Error(`Expected '=' after key at ${i}`);
+            i++;
+            return key;
+        }
+
+        function parseTableEntry(result, arrayIndex) {
+            if (s[i] === '[') {
+                const key = parseBracketKey();
+                result[key] = parseValue();
+                return arrayIndex;
+            }
+            const value = parseValue();
+            skipWhitespace();
+            if (s[i] === '=') {
+                i++;
+                result[value] = parseValue();
+                return arrayIndex;
+            }
+            // Bare value: Lua array-style entry
+            result[arrayIndex] = value;
+            return arrayIndex + 1;
         }
 
         function parseTable() {
@@ -67,29 +99,7 @@ export class HelmodFactory {
             let arrayIndex = 1;
             skipWhitespace();
             while (i < s.length && s[i] !== '}') {
-                if (s[i] === '[') {
-                    const end = s.indexOf(']', i);
-                    if (end === -1) throw new Error(`Unterminated '[' key at ${i}`);
-                    let key = s.slice(i + 1, end).trim();
-                    if (key.startsWith('"') || key.startsWith("'")) {
-                        key = key.slice(1, -1);
-                    }
-                    i = end + 1;
-                    skipWhitespace();
-                    if (s[i] !== '=') throw new Error(`Expected '=' after key at ${i}`);
-                    i++;
-                    result[key] = parseValue();
-                } else {
-                    const value = parseValue();
-                    skipWhitespace();
-                    if (s[i] === '=') {
-                        i++;
-                        result[value] = parseValue();
-                    } else {
-                        // Bare value: Lua array-style entry
-                        result[arrayIndex++] = value;
-                    }
-                }
+                arrayIndex = parseTableEntry(result, arrayIndex);
                 skipWhitespace();
                 if (s[i] === ',') {
                     i++;
@@ -104,33 +114,35 @@ export class HelmodFactory {
         return parseValue();
     }
 
-    static pythonToLua(data) {
-        if (typeof data === 'object' && data !== null) {
-            if (Array.isArray(data)) {
-                return '{' + data.map(x => HelmodFactory.pythonToLua(x)).join(',') + '}';
-            } else {
-                const items = [];
-                for (const [k, v] of Object.entries(data)) {
-                    let key = k;
-                    if (typeof k === 'string') {
-                        if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k)) {
-                            key = k;
-                        } else {
-                            key = `["${k}"]`;
-                        }
-                    }
-                    items.push(`${key}=${HelmodFactory.pythonToLua(v)}`);
-                }
-                return '{' + items.join(',') + '}';
-            }
-        } else if (typeof data === 'string') {
-            return `"${data}"`;
-        } else if (typeof data === 'boolean') {
-            return data ? 'true' : 'false';
-        } else if (data === null) {
-            return 'nil';
-        } else {
-            return String(data);
+    static luaKey(k) {
+        if (typeof k === 'string' && !/^[a-zA-Z_]\w*$/.test(k)) {
+            return `["${k}"]`;
         }
+        return k;
+    }
+
+    static objectToLua(data) {
+        const items = Object.entries(data)
+            .map(([k, v]) => `${HelmodFactory.luaKey(k)}=${HelmodFactory.pythonToLua(v)}`);
+        return '{' + items.join(',') + '}';
+    }
+
+    static pythonToLua(data) {
+        if (Array.isArray(data)) {
+            return '{' + data.map(x => HelmodFactory.pythonToLua(x)).join(',') + '}';
+        }
+        if (data !== null && typeof data === 'object') {
+            return HelmodFactory.objectToLua(data);
+        }
+        if (typeof data === 'string') {
+            return `"${data}"`;
+        }
+        if (typeof data === 'boolean') {
+            return data ? 'true' : 'false';
+        }
+        if (data === null) {
+            return 'nil';
+        }
+        return String(data);
     }
 }

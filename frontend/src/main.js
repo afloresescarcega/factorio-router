@@ -9,12 +9,12 @@ function parseHelmodData(helmodData) {
 
     function walk(node) {
         if (typeof node !== 'object' || node === null) return;
-        if (node.type === 'recipe' && node.name && node.factory && node.factory.name) {
-            const rawCount = parseFloat(node.factory.count);
+        if (node.type === 'recipe' && node.name && node.factory?.name) {
+            const rawCount = Number.parseFloat(node.factory.count);
             productionUnits.push({
                 recipe: node.name,
                 factory: node.factory.name,
-                count: Math.max(1, Math.ceil(isNaN(rawCount) ? 1 : rawCount)),
+                count: Math.max(1, Math.ceil(Number.isNaN(rawCount) ? 1 : rawCount)),
             });
         }
         for (const value of Object.values(node)) {
@@ -85,6 +85,200 @@ function sortUnits(units) {
     return [...units].sort((a, b) => depth.get(a) - depth.get(b));
 }
 
+// Machines are 3x3 centered on (x, y); items flow west -> east through them.
+// Inserter direction in the blueprint format points at the tile the
+// inserter picks up FROM. Lane offsets from the column center, by
+// ingredient index: 0 -> normal inserter, 1 and 2 -> long-handed.
+const LANE_OFFSETS = [-3, -4, 4];
+const OUTPUT_OFFSET = 3;
+const COLUMN_SPACING = 10;
+const ROW_SPACING = 4;
+const MAX_PER_COLUMN = 15; // wrap tall recipes into multiple columns
+
+function planColumns(productionUnits) {
+    const columns = [];
+    let nextX = 0;
+    for (const unit of productionUnits) {
+        console.log(`Adding ${unit.count}x ${unit.factory} for recipe ${unit.recipe}`);
+        let remaining = unit.count;
+        while (remaining > 0) {
+            const count = Math.min(remaining, MAX_PER_COLUMN);
+            columns.push({x: nextX, unit, count});
+            nextX += COLUMN_SPACING;
+            remaining -= count;
+        }
+    }
+    return columns;
+}
+
+// One bus line per consumed item, in reserved rows above the grid. Rows are
+// 2 apart so branches can hop lower buses with underground belts; 3 rows is
+// the deepest a yellow underground can clear.
+function planBuses(columns) {
+    const busByItem = new Map();
+    for (const column of columns) {
+        column.unit.ingredients.forEach((ingredient, laneIndex) => {
+            if (!busByItem.has(ingredient.name)) {
+                busByItem.set(ingredient.name, {item: ingredient.name, consumers: [], producers: []});
+            }
+            busByItem.get(ingredient.name).consumers.push({column, laneIndex});
+        });
+    }
+    for (const column of columns) {
+        for (const result of column.unit.results) {
+            if (busByItem.has(result.name)) {
+                busByItem.get(result.name).producers.push(column);
+            }
+        }
+    }
+    let buses = [...busByItem.values()];
+    // Intermediates get the rows closest to the machines
+    buses.sort((a, b) => (b.producers.length ? 1 : 0) - (a.producers.length ? 1 : 0));
+    if (buses.length > 3) {
+        const dropped = buses.slice(3);
+        console.warn(`More than 3 items consumed; not routing: ${dropped.map(b => b.item).join(', ')}`);
+        buses = buses.slice(0, 3);
+    }
+    buses.forEach((bus, i) => { bus.row = -4 - 2 * i; });
+    return buses;
+}
+
+function addMachineAndInserters(x, y, unit, add) {
+    const machine = {name: unit.factory, position: {x, y}};
+    if (acceptsRecipe(unit.factory)) {
+        machine.recipe = unit.recipe;
+    }
+    add(machine, [[x - 1, y - 1], [x, y - 1], [x + 1, y - 1],
+                  [x - 1, y], [x, y], [x + 1, y],
+                  [x - 1, y + 1], [x, y + 1], [x + 1, y + 1]]);
+
+    // Output inserter: machine -> east belt
+    add({name: "inserter", position: {x: x + 2, y}, direction: 6});
+    // Input inserters, one per ingredient lane
+    if (unit.ingredients.length > 0) {
+        add({name: "inserter", position: {x: x - 2, y}, direction: 6});
+    }
+    if (unit.ingredients.length > 1) {
+        add({name: "long-handed-inserter", position: {x: x - 2, y: y + 1}, direction: 6});
+    }
+    if (unit.ingredients.length > 2) {
+        add({name: "long-handed-inserter", position: {x: x + 2, y: y + 1}, direction: 2});
+    }
+    // Pole between machines covers inserters on both sides
+    add({name: "medium-electric-pole", position: {x, y: y + 2}});
+}
+
+// Intermediates flow north into their bus, final products flow south and
+// pile up at the bottom.
+function routeOutputLane(x, columnBottom, unit, {belt, underground, busFor}) {
+    const outputX = x + OUTPUT_OFFSET;
+    const feedsBus = unit.results.map(r => busFor(r.name)).find(Boolean);
+    if (feedsBus) {
+        for (let y = -1; y <= columnBottom; y++) {
+            belt(outputX, y, 0);
+        }
+        if (feedsBus.row === -4) {
+            belt(outputX, -2, 0);
+            belt(outputX, -3, 0);
+        } else {
+            underground(outputX, -2, 0, "input");
+            underground(outputX, feedsBus.row + 1, 0, "output");
+        }
+        return;
+    }
+    for (let y = -2; y <= columnBottom; y++) {
+        belt(outputX, y, 4);
+    }
+}
+
+function addMachineColumn({x, unit, count}, {add, belt, underground, busFor}) {
+    const columnBottom = (count - 1) * ROW_SPACING + 1;
+
+    for (let i = 0; i < count; i++) {
+        addMachineAndInserters(x, i * ROW_SPACING, unit, add);
+    }
+    // Relay poles at the top keep neighboring columns connected
+    add({name: "medium-electric-pole", position: {x: x - 2, y: -2}});
+    add({name: "medium-electric-pole", position: {x: x + 2, y: -2}});
+
+    // Ingredient lanes flow south; they are fed by bus taps in addBusLines.
+    unit.ingredients.forEach((ingredient, laneIndex) => {
+        const laneX = x + LANE_OFFSETS[laneIndex];
+        for (let y = -1; y <= columnBottom; y++) {
+            belt(laneX, y, 4);
+        }
+    });
+
+    routeOutputLane(x, columnBottom, unit, {belt, underground, busFor});
+}
+
+function addMachinesAndInserters(columns, ctx) {
+    for (const column of columns) {
+        addMachineColumn(column, ctx);
+    }
+}
+
+// Splitter taps into each consumer lane; branches from the splitter down
+// into the lane.
+function tapBusConsumers(bus, {add, belt, underground}) {
+    const flowsEast = bus.producers.length === 0;
+    const direction = flowsEast ? 2 : 6;
+    const splitterXs = new Set();
+
+    for (const {column, laneIndex} of bus.consumers) {
+        const laneX = column.x + LANE_OFFSETS[laneIndex];
+        const splitterX = flowsEast ? laneX - 1 : laneX + 1;
+        splitterXs.add(splitterX);
+        add({name: "splitter", position: {x: splitterX, y: bus.row + 0.5}, direction},
+            [[splitterX, bus.row], [splitterX, bus.row + 1]]);
+        if (bus.row === -4) {
+            belt(laneX, -3, 4);
+            belt(laneX, -2, 4);
+        } else {
+            underground(laneX, bus.row + 1, 4, "input");
+            underground(laneX, -2, 4, "output");
+        }
+    }
+    return {flowsEast, direction, splitterXs};
+}
+
+function fillBusRow(bus, {flowsEast, direction, splitterXs, feederXs}, belt) {
+    const tapXs = [...splitterXs];
+    const from = flowsEast ? Math.min(...tapXs) - 4 : Math.min(...tapXs);
+    const to = flowsEast ? Math.max(...tapXs) : Math.max(...feederXs);
+    for (let bx = from; bx <= to; bx++) {
+        if (!splitterXs.has(bx)) {
+            belt(bx, bus.row, direction);
+        }
+    }
+    return from;
+}
+
+// Bus lines with splitter taps dropping into each consumer lane. Externals
+// flow east from a west lead-in; intermediates flow west from their
+// producers (sorted east of consumers).
+function addBusLines(buses, {add, belt, underground}) {
+    for (const bus of buses) {
+        const {flowsEast, direction, splitterXs} = tapBusConsumers(bus, {add, belt, underground});
+        const feederXs = bus.producers.map(c => c.x + OUTPUT_OFFSET);
+        const from = fillBusRow(bus, {flowsEast, direction, splitterXs, feederXs}, belt);
+
+        if (flowsEast) {
+            // Label the feed point so a human knows what this lane takes
+            add({
+                name: "constant-combinator",
+                position: {x: from - 1, y: bus.row},
+                control_behavior: {
+                    filters: [{signal: {type: "item", name: bus.item}, count: 1, index: 1}]
+                }
+            });
+        }
+        console.log(`Bus for ${bus.item} on row ${bus.row}, ` +
+            `${flowsEast ? 'east from external input' : 'west from ' + bus.producers.length + ' producer columns'}, ` +
+            `${bus.consumers.length} taps`);
+    }
+}
+
 function createBlueprintFromHelmod(helmodData) {
     const productionUnits = sortUnits(enrichUnits(parseHelmodData(helmodData)));
 
@@ -118,170 +312,12 @@ function createBlueprintFromHelmod(helmodData) {
     const underground = (x, y, direction, type) =>
         add({name: "underground-belt", position: {x, y}, direction, type});
 
-    // Machines are 3x3 centered on (x, y); items flow west -> east through
-    // them. Inserter direction in the blueprint format points at the tile the
-    // inserter picks up FROM. Lane offsets from the column center, by
-    // ingredient index: 0 -> normal inserter, 1 and 2 -> long-handed.
-    const LANE_OFFSETS = [-3, -4, 4];
-    const OUTPUT_OFFSET = 3;
-    const COLUMN_SPACING = 10;
-    const ROW_SPACING = 4;
-    const MAX_PER_COLUMN = 15; // wrap tall recipes into multiple columns
-
-    // 1. Plan columns.
-    const columns = [];
-    let nextX = 0;
-    for (const unit of productionUnits) {
-        console.log(`Adding ${unit.count}x ${unit.factory} for recipe ${unit.recipe}`);
-        let remaining = unit.count;
-        while (remaining > 0) {
-            const count = Math.min(remaining, MAX_PER_COLUMN);
-            columns.push({x: nextX, unit, count});
-            nextX += COLUMN_SPACING;
-            remaining -= count;
-        }
-    }
-
-    // 2. Plan buses: one line per consumed item, in reserved rows above the
-    // grid. Rows are 2 apart so branches can hop lower buses with underground
-    // belts; 3 rows is the deepest a yellow underground can clear.
-    const busByItem = new Map();
-    for (const column of columns) {
-        column.unit.ingredients.forEach((ingredient, laneIndex) => {
-            if (!busByItem.has(ingredient.name)) {
-                busByItem.set(ingredient.name, {item: ingredient.name, consumers: [], producers: []});
-            }
-            busByItem.get(ingredient.name).consumers.push({column, laneIndex});
-        });
-    }
-    for (const column of columns) {
-        for (const result of column.unit.results) {
-            if (busByItem.has(result.name)) {
-                busByItem.get(result.name).producers.push(column);
-            }
-        }
-    }
-    let buses = [...busByItem.values()];
-    // Intermediates get the rows closest to the machines
-    buses.sort((a, b) => (b.producers.length ? 1 : 0) - (a.producers.length ? 1 : 0));
-    if (buses.length > 3) {
-        const dropped = buses.slice(3);
-        console.warn(`More than 3 items consumed; not routing: ${dropped.map(b => b.item).join(', ')}`);
-        buses = buses.slice(0, 3);
-    }
-    buses.forEach((bus, i) => { bus.row = -4 - 2 * i; });
+    const columns = planColumns(productionUnits);
+    const buses = planBuses(columns);
     const busFor = item => buses.find(b => b.item === item);
 
-    // 3. Machines, inserters, poles and vertical lanes per column.
-    for (const {x, unit, count} of columns) {
-        const columnBottom = (count - 1) * ROW_SPACING + 1;
-
-        for (let i = 0; i < count; i++) {
-            const y = i * ROW_SPACING;
-            const machine = {name: unit.factory, position: {x, y}};
-            if (acceptsRecipe(unit.factory)) {
-                machine.recipe = unit.recipe;
-            }
-            add(machine, [[x - 1, y - 1], [x, y - 1], [x + 1, y - 1],
-                          [x - 1, y], [x, y], [x + 1, y],
-                          [x - 1, y + 1], [x, y + 1], [x + 1, y + 1]]);
-
-            // Output inserter: machine -> east belt
-            add({name: "inserter", position: {x: x + 2, y}, direction: 6});
-            // Input inserters, one per ingredient lane
-            if (unit.ingredients.length > 0) {
-                add({name: "inserter", position: {x: x - 2, y}, direction: 6});
-            }
-            if (unit.ingredients.length > 1) {
-                add({name: "long-handed-inserter", position: {x: x - 2, y: y + 1}, direction: 6});
-            }
-            if (unit.ingredients.length > 2) {
-                add({name: "long-handed-inserter", position: {x: x + 2, y: y + 1}, direction: 2});
-            }
-            // Pole between machines covers inserters on both sides
-            add({name: "medium-electric-pole", position: {x, y: y + 2}});
-        }
-        // Relay poles at the top keep neighboring columns connected
-        add({name: "medium-electric-pole", position: {x: x - 2, y: -2}});
-        add({name: "medium-electric-pole", position: {x: x + 2, y: -2}});
-
-        // Ingredient lanes flow south; they are fed by bus taps in step 4.
-        unit.ingredients.forEach((ingredient, laneIndex) => {
-            const laneX = x + LANE_OFFSETS[laneIndex];
-            for (let y = -1; y <= columnBottom; y++) {
-                belt(laneX, y, 4);
-            }
-        });
-
-        // Output lane: intermediates flow north into their bus, final
-        // products flow south and pile up at the bottom.
-        const outputX = x + OUTPUT_OFFSET;
-        const feedsBus = unit.results.map(r => busFor(r.name)).find(Boolean);
-        if (feedsBus) {
-            for (let y = -1; y <= columnBottom; y++) {
-                belt(outputX, y, 0);
-            }
-            if (feedsBus.row === -4) {
-                belt(outputX, -2, 0);
-                belt(outputX, -3, 0);
-            } else {
-                underground(outputX, -2, 0, "input");
-                underground(outputX, feedsBus.row + 1, 0, "output");
-            }
-        } else {
-            for (let y = -2; y <= columnBottom; y++) {
-                belt(outputX, y, 4);
-            }
-        }
-    }
-
-    // 4. Bus lines with splitter taps dropping into each consumer lane.
-    for (const bus of buses) {
-        // Externals flow east from a west lead-in; intermediates flow west
-        // from their producers (sorted east of consumers).
-        const flowsEast = bus.producers.length === 0;
-        const direction = flowsEast ? 2 : 6;
-        const splitterXs = new Set();
-
-        for (const {column, laneIndex} of bus.consumers) {
-            const laneX = column.x + LANE_OFFSETS[laneIndex];
-            const splitterX = flowsEast ? laneX - 1 : laneX + 1;
-            splitterXs.add(splitterX);
-            add({name: "splitter", position: {x: splitterX, y: bus.row + 0.5}, direction},
-                [[splitterX, bus.row], [splitterX, bus.row + 1]]);
-            // Branch from the splitter down into the lane
-            if (bus.row === -4) {
-                belt(laneX, -3, 4);
-                belt(laneX, -2, 4);
-            } else {
-                underground(laneX, bus.row + 1, 4, "input");
-                underground(laneX, -2, 4, "output");
-            }
-        }
-
-        const tapXs = [...splitterXs];
-        const feederXs = bus.producers.map(c => c.x + OUTPUT_OFFSET);
-        const from = flowsEast ? Math.min(...tapXs) - 4 : Math.min(...tapXs);
-        const to = flowsEast ? Math.max(...tapXs) : Math.max(...feederXs);
-        for (let bx = from; bx <= to; bx++) {
-            if (!splitterXs.has(bx)) {
-                belt(bx, bus.row, direction);
-            }
-        }
-        if (flowsEast) {
-            // Label the feed point so a human knows what this lane takes
-            add({
-                name: "constant-combinator",
-                position: {x: from - 1, y: bus.row},
-                control_behavior: {
-                    filters: [{signal: {type: "item", name: bus.item}, count: 1, index: 1}]
-                }
-            });
-        }
-        console.log(`Bus for ${bus.item} on row ${bus.row}, ` +
-            `${flowsEast ? 'east from external input' : 'west from ' + bus.producers.length + ' producer columns'}, ` +
-            `${bus.consumers.length} taps`);
-    }
+    addMachinesAndInserters(columns, {add, belt, underground, busFor});
+    addBusLines(buses, {add, belt, underground});
 
     console.log(`Total entities added: ${entities.length}`);
     return blueprint;

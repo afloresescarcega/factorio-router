@@ -9,5 +9,5 @@ test('renders into #root without crashing', () => {
     require('./index');
   }).not.toThrow();
 
-  document.body.removeChild(div);
+  div.remove();
 });

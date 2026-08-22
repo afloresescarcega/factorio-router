@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(here, 'cli.mjs');
 
 function runCli(input, args = []) {
-  return spawnSync('node', [cliPath, ...args], {
+  return spawnSync(process.execPath, [cliPath, ...args], {
     input,
     encoding: 'utf-8',
   });
@@ -54,7 +54,7 @@ describe('cli.mjs', () => {
     // stdout isn't a single clean line -- but the final line is still the
     // blueprint string.
     const lines = result.stdout.trim().split('\n');
-    const lastLine = lines[lines.length - 1];
+    const lastLine = lines.at(-1);
     assert.equal(lastLine[0], '0');
     assert.doesNotThrow(() => decodeBlueprint(lastLine));
   });

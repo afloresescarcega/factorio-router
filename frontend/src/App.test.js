@@ -19,8 +19,8 @@ test('shows an error message when the input cannot be converted', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   render(<App />);
 
-  await userEvent.type(screen.getByPlaceholderText(/enter helmod string/i), 'not a valid helmod string');
-  await userEvent.click(screen.getByRole('button', { name: /convert/i }));
+  userEvent.type(screen.getByPlaceholderText(/enter helmod string/i), 'not a valid helmod string');
+  userEvent.click(screen.getByRole('button', { name: /convert/i }));
 
   expect(await screen.findByText(/error:/i)).toBeInTheDocument();
   console.error.mockRestore();
@@ -40,8 +40,8 @@ test('shows the resulting blueprint string on a successful conversion', async ()
 
   render(<App />);
   const textarea = screen.getByPlaceholderText(/enter helmod string/i);
-  await userEvent.type(textarea, helmodString);
-  await userEvent.click(screen.getByRole('button', { name: /convert/i }));
+  userEvent.type(textarea, helmodString);
+  userEvent.click(screen.getByRole('button', { name: /convert/i }));
 
   expect(await screen.findByText(/blueprint string:/i)).toBeInTheDocument();
   expect(screen.getByDisplayValue(/^0/)).toBeInTheDocument();
