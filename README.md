@@ -1,5 +1,7 @@
 # factorio-router
 
+[![Quality Gate Status](https://sonarqube.us/api/project_badges/measure?project=afloresescarcega_factorio-router&metric=alert_status)](https://sonarqube.us/summary/new_code?id=afloresescarcega_factorio-router)
+
 A simple program to come up with an inefficient routing plan for all your factory machines and supplies.
 
 This project consumes a Helmod Factorio Calculator's export string and produces a basic blueprint with an inefficient layout (route) of inputs to machines.
