@@ -37,6 +37,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           CI=true npx react-scripts test --coverage --watchAll=false
+          mkdir -p coverage-node
           node --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage-node/lcov.info --test cli.test.mjs validator/validate.test.mjs
 
       - name: SonarQube Scan
