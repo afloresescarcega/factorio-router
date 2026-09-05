@@ -9,8 +9,10 @@ import {
   craftingCapacity,
 } from "./planner.js";
 import { createLayout } from "./layout.js";
+import { transportSettings } from "./transport.js";
 
 export function planHelmodString(helmodString, config = {}) {
+  const { outputStackSize } = transportSettings(config);
   let data;
   try {
     data = HelmodFactory.decodeHelmod(helmodString);
@@ -49,7 +51,7 @@ export function planHelmodString(helmodString, config = {}) {
   const balance = new Map();
   const units = [...byRecipe.values()].map((unit) => {
     const recipe = recipeById[unit.recipe];
-    const crafts = unit.count * craftingCapacity(recipe, unit.factory);
+    const crafts = unit.count * craftingCapacity(recipe, unit.factory, outputStackSize);
     for (const result of unit.results)
       balance.set(
         result.name,

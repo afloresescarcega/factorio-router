@@ -5,6 +5,7 @@ import App from "./App.jsx";
 import { decodeBlueprint } from "./blueprintFactory.js";
 import { HelmodFactory } from "./helmodFactory.js";
 import { entitySize } from "./layout.js";
+import { MAX_OUTPUTS } from "./planner.js";
 
 function showExport() {
   fireEvent.click(screen.getByRole("tab", { name: "Blueprint string" }));
@@ -178,4 +179,95 @@ test("Helmod imports become editable native targets and machine counts", () => {
       (entity) => entity.recipe === "iron-gear-wheel",
     ),
   ).toHaveLength(2);
+});
+
+test("rate units convert targets and supply together without changing the blueprint", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Iron plate supply limit"), { target: { value: "60" } });
+  const original = showExport().value;
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/s" } });
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(1);
+  expect(screen.getByLabelText("Iron plate supply limit")).toHaveValue(1);
+  expect(showExport().value).toBe(original);
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "belts" } });
+  expect(screen.getByLabelText("Output rate 1").valueAsNumber).toBeCloseTo(1 / 15, 10);
+  expect(screen.getByText(/Enter a fraction or multiple/)).toHaveTextContent("at most 0.5 belts");
+  expect(showExport().value).toBe(original);
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/min" } });
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(60);
+  expect(showExport().value).toBe(original);
+});
+
+test("green belts and independent stacking generate real entities and recover safely from overload", () => {
+  render(<App />);
+  expect(screen.getByText("Belt stacking").closest("details")).not.toHaveAttribute("open");
+  fireEvent.change(screen.getByLabelText("Output recipe 1"), { target: { value: "copper-cable" } });
+  fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "turbo-transport-belt" } });
+  fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Output stacks"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "belts" } });
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "0.5" } });
+  const exported = decodeBlueprint(showExport().value).blueprint;
+  expect(exported.entities.some((entity) => entity.name === "turbo-transport-belt")).toBe(true);
+  expect(exported.entities.filter((entity) => entity.name === "stack-inserter").every((entity) => entity.override_stack_size === 4)).toBe(true);
+  expect(screen.getByText(/120 items\/s · 7,200 items\/min/)).toHaveTextContent("100% of output lane");
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "0.501" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("one lane");
+  expect(screen.queryByLabelText("Import this string in Factorio")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "0.5" } });
+  expect(showExport().value).toBeTruthy();
+  // Output stacks are still 4 high, but the external input can no longer carry the demand.
+  fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "1" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("Copper plate needs 3,600/min");
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "2" } });
+  expect(showExport().value).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reset example" }));
+  expect(screen.getByLabelText("Belts")).toHaveValue("transport-belt");
+  expect(screen.getByLabelText("Rate units")).toHaveValue("items/min");
+  expect(screen.getByLabelText("Input stacks")).toHaveValue("1");
+  expect(screen.getByLabelText("Output stacks")).toHaveValue("1");
+});
+
+test("blank rate stays invalid across units and can be corrected", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/s" } });
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(null);
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "1" } });
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+});
+
+test("all catalog targets can be added without duplicate selections or an oversized title", () => {
+  render(<App />);
+  // Keep the preview hidden while editing a large invalid plan.
+  fireEvent.change(screen.getByLabelText("Machine budget"), { target: { value: "1" } });
+  for (let i = 1; i < MAX_OUTPUTS; i++) fireEvent.click(screen.getByRole("button", { name: /Add output/ }));
+  const recipes = screen.getAllByRole("combobox", { name: /Output recipe/ });
+  expect(recipes).toHaveLength(MAX_OUTPUTS);
+  expect(new Set(recipes.map((select) => select.value)).size).toBe(MAX_OUTPUTS);
+  expect(screen.getByRole("button", { name: /Add output/ })).toBeDisabled();
+  expect(screen.getByRole("heading", { name: `${MAX_OUTPUTS} output targets` })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove output 2" }));
+  expect(screen.getByRole("button", { name: /Add output/ })).toBeEnabled();
+}, 15000);
+
+test("Helmod import keeps Space Age settings and converts canonical rates to the selected unit", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "turbo-transport-belt" } });
+  fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Output stacks"), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/s" } });
+  fireEvent.change(screen.getByLabelText("Helmod export"), { target: { value: HelmodFactory.encodeHelmod({
+    type: "recipe", name: "copper-cable", factory: { name: "assembling-machine-3", count: 2 },
+  }) } });
+  fireEvent.click(screen.getByRole("button", { name: "Import machine counts" }));
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(6);
+  expect(screen.getByLabelText("Input stacks")).toHaveValue("2");
+  expect(screen.getByLabelText("Output stacks")).toHaveValue("3");
+  const blueprint = decodeBlueprint(showExport().value).blueprint;
+  expect(blueprint.entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(2);
 });

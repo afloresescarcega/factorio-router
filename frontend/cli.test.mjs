@@ -19,6 +19,38 @@ const helmod = HelmodFactory.encodeHelmod({
   },
 });
 
+test("native CLI normalizes second and belt units and validates Space Age entities", () => {
+  for (const [rateUnit, rate] of [["items/min", 7200], ["items/s", 120], ["belts", 0.5]]) {
+    const result = run(JSON.stringify({
+      belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
+      rateUnit, outputs: [{ recipe: "copper-cable", rate }], layoutMode: "compact",
+    }), ["--plan"]);
+    assert.equal(result.status, 0, result.stderr);
+    const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
+    assert.match(blueprint.description, /7,200\/min/);
+    assert.ok(blueprint.entities.some((entity) => entity.name === "turbo-underground-belt"));
+    const inserters = blueprint.entities.filter((entity) => entity.name === "stack-inserter");
+    assert.equal(inserters.length, 40);
+    assert.ok(inserters.every((entity) => entity.override_stack_size === 4));
+  }
+});
+
+test("native CLI never emits blueprints for invalid Space Age constraints", () => {
+  for (const patch of [
+    { outputStackSize: 5 }, { inputStackSize: 1.5 }, { rateUnit: "belt/s" },
+    { outputs: [{ recipe: "copper-cable", rate: 0.501 }] },
+    { inputStackSize: 1 }, { inputLimits: { "copper-plate": 0.249 } },
+  ]) {
+    const result = run(JSON.stringify({
+      belt: "turbo-transport-belt", rateUnit: "belts", inputStackSize: 4, outputStackSize: 4,
+      outputs: [{ recipe: "copper-cable", rate: 0.5 }], ...patch,
+    }), ["--plan"]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.ok(result.stderr.length > 0);
+  }
+});
+
 test("CLI accepts optional Helmod and keeps stdout clean even in debug mode", () => {
   for (const args of [[], ["--debug"]]) {
     const result = run(helmod, args);

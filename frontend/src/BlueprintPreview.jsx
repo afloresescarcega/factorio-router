@@ -22,14 +22,15 @@ function Entity({ entity }) {
     : pole
       ? COLORS.pole
       : inserter
-        ? COLORS.inserter
-        : COLORS.belt;
+        ? entity.name === "stack-inserter" ? "#c9ded3" : COLORS.inserter
+        : entity.name.startsWith("turbo-") ? "#6ebd77" : COLORS.belt;
   return (
     <g>
       <title>
         {title(entity.name)}
         {entity.recipe ? ` · ${title(entity.recipe)}` : ""} · {x}, {y}
         {entity.type ? ` · ${entity.type}` : ""}
+        {entity.override_stack_size ? ` · ${entity.override_stack_size} items per batch` : ""}
       </title>
       <rect
         x={x - w / 2 + 0.06}
@@ -102,6 +103,8 @@ function Entity({ entity }) {
 export default function BlueprintPreview({ layout }) {
   const [zoom, setZoom] = useState(1);
   const { bounds, blueprint, annotations, footprint } = layout;
+  const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
+  const beltColor = blueprint.blueprint.entities.some((entity) => entity.name === "turbo-transport-belt") ? "#6ebd77" : COLORS.belt;
   const width = bounds.right - bounds.left + 1,
     height = bounds.bottom - bounds.top + 1;
   const entityByNumber = new Map(
@@ -225,13 +228,14 @@ export default function BlueprintPreview({ layout }) {
           Machines
         </span>
         <span>
-          <i style={{ background: COLORS.belt }} />
+          <i style={{ background: beltColor }} />
           Belts & crossings
         </span>
         <span>
           <i style={{ background: COLORS.inserter }} />
           Inserters
         </span>
+        {hasStackOutputs && <span><i style={{ background: "#c9ded3" }} />Stack outputs</span>}
         <span>
           <i style={{ background: COLORS.pole }} />
           Power

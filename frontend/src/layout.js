@@ -241,7 +241,11 @@ export function createLayout(
         y,
         unit.factory === "electric-furnace" ? {} : { recipe: unit.recipe },
       );
-      add("fast-inserter", x + 2, y, { direction: WEST });
+      add(plan.outputStackSize > 1 ? "stack-inserter" : "fast-inserter", x + 2, y, {
+        direction: WEST,
+        // A full hand is exactly one belt stack, even with higher research.
+        ...(plan.outputStackSize > 1 ? { override_stack_size: plan.outputStackSize } : {}),
+      });
       if (unit.ingredients[0])
         add("fast-inserter", x - 2, y, { direction: WEST });
       if (unit.ingredients[1])
@@ -298,7 +302,9 @@ export function createLayout(
       item: "blueprint",
       label:
         "Router: " +
-        plan.outputs.map((output) => title(output.name)).join(", "),
+        (plan.outputs.length > 3
+          ? `${plan.outputs.length} output targets`
+          : plan.outputs.map((output) => title(output.name)).join(", ")),
       description,
       version: 562949953421312,
       icons: plan.outputs

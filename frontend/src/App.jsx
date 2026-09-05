@@ -3,6 +3,7 @@ import { RECIPES, MACHINES } from "./recipeCatalog.js";
 import {
   BELTS,
   DEFAULT_CONFIG,
+  MAX_OUTPUTS,
   planProduction,
   title,
   formatRate,
@@ -11,9 +12,10 @@ import { createLayout } from "./layout.js";
 import { encodeBlueprint } from "./blueprintFactory.js";
 import { planHelmodString } from "./main.js";
 import BlueprintPreview from "./BlueprintPreview.jsx";
+import { RATE_UNITS, convertRateUnit, numericRate, rateExceeds, rateScale } from "./transport.js";
 import "./App.css";
 
-function RecipeSelect({ value, onChange, label }) {
+function RecipeSelect({ value, onChange, label, selected }) {
   return (
     <select
       aria-label={label}
@@ -21,7 +23,7 @@ function RecipeSelect({ value, onChange, label }) {
       onChange={(e) => onChange(e.target.value)}
     >
       {RECIPES.map((recipe) => (
-        <option key={recipe.id} value={recipe.id}>
+        <option key={recipe.id} value={recipe.id} disabled={recipe.id !== value && selected.includes(recipe.id)}>
           {recipe.name}
         </option>
       ))}
@@ -57,6 +59,10 @@ export default function App() {
     }
   }, [config]);
   const { plan, layout, string } = result;
+  const inputScale = rateScale(config.rateUnit, config.belt, config.inputStackSize);
+  const outputScale = rateScale(config.rateUnit, config.belt, config.outputStackSize);
+  const outputLaneCapacity = BELTS[config.belt].laneRate * config.outputStackSize;
+  const selectedRecipes = config.outputs.map((output) => output.recipe);
   const updateOutput = (index, patch) =>
     update({
       outputs: config.outputs.map((output, i) =>
@@ -102,16 +108,21 @@ export default function App() {
         belt: config.belt,
         maxMachines: config.maxMachines,
         layoutMode: config.layoutMode,
+        inputStackSize: config.inputStackSize,
+        outputStackSize: config.outputStackSize,
       });
       update({
         ...DEFAULT_CONFIG,
         outputs: imported.outputs.map(({ name, rate }) => ({
           recipe: name,
-          rate,
+          rate: rate / outputScale,
         })),
         belt: config.belt,
         maxMachines: config.maxMachines,
         layoutMode: config.layoutMode,
+        rateUnit: config.rateUnit,
+        inputStackSize: config.inputStackSize,
+        outputStackSize: config.outputStackSize,
         fromOre: true,
         externalItems: imported.inputs.map((input) => input.name),
         machineOverrides: Object.fromEntries(
@@ -139,7 +150,7 @@ export default function App() {
             FACTORIO<span className="brand-light"> / ROUTER</span>
           </span>
         </a>
-        <span className="version-label">VANILLA 2.0 · SOLID ITEMS</span>
+        <span className="version-label">FACTORIO 2.0 · SOLID ITEMS</span>
       </header>
       <main>
         <div className="page-heading">
@@ -168,23 +179,40 @@ export default function App() {
                 <h2>
                   <span className="step">01</span> Output targets
                 </h2>
-                <span className="unit">ITEMS / MIN</span>
+                <select
+                  className="rate-unit-select"
+                  aria-label="Rate units"
+                  value={config.rateUnit}
+                  onChange={(e) => update(convertRateUnit(config, e.target.value))}
+                >
+                  {RATE_UNITS.map((unit) => <option key={unit} value={unit}>{unit === "belts" ? "Belts" : unit}</option>)}
+                </select>
               </div>
+              {config.rateUnit === "belts" && (
+                <p className="help">
+                  Enter a fraction or multiple of a full belt. 1 output belt = {formatRate(outputScale / 60)} items/s
+                  ({formatRate(outputScale)} items/min) at the selected tier and output stack size.
+                  Each material gets one lane, so this layout supports at most 0.5 belts per material.
+                </p>
+              )}
+              <div className="output-targets">
               {config.outputs.map((output, i) => (
+                <div className="output-target" key={i}>
                 <div className="output-row" key={i}>
                   <label className="sr-only" htmlFor={`rate-${i}`}>
                     Output rate {i + 1}
                   </label>
                   <RecipeSelect
                     label={`Output recipe ${i + 1}`}
+                    selected={selectedRecipes}
                     value={output.recipe}
                     onChange={(recipe) => updateOutput(i, { recipe })}
                   />
                   <input
                     id={`rate-${i}`}
                     type="number"
-                    min="0.01"
-                    max="100000"
+                    min="0"
+                    max={100000 / outputScale}
                     step="any"
                     value={output.rate}
                     onChange={(e) => updateOutput(i, { rate: e.target.value })}
@@ -204,21 +232,33 @@ export default function App() {
                     ×
                   </button>
                 </div>
+                {numericRate(output.rate) > 0 && (
+                  <p className={`rate-feedback ${rateExceeds(Number(output.rate) * outputScale, outputLaneCapacity) ? "over-capacity" : ""}`}>
+                    {formatRate(Number(output.rate) * outputScale / 60)} items/s · {formatRate(Number(output.rate) * outputScale)} items/min
+                    {" · "}{formatRate(Number(output.rate) * outputScale / outputLaneCapacity * 100)}% of output lane
+                  </p>
+                )}
+                </div>
               ))}
+              </div>
               <button
                 className="text-button"
-                disabled={config.outputs.length >= 20}
+                disabled={config.outputs.length >= MAX_OUTPUTS}
                 onClick={() =>
                   update({
                     outputs: [
                       ...config.outputs,
-                      { recipe: "iron-gear-wheel", rate: 60 },
+                      {
+                        recipe: ["iron-gear-wheel", ...RECIPES.map((recipe) => recipe.id)].find((id) => !selectedRecipes.includes(id)),
+                        rate: 60 / outputScale,
+                      },
                     ],
                   })
                 }
               >
                 + Add output
               </button>
+              {config.outputs.length > 3 && <span className="target-count">{config.outputs.length} / {MAX_OUTPUTS} targets</span>}
               <label className="check-row">
                 <input
                   type="checkbox"
@@ -278,6 +318,23 @@ export default function App() {
                   />
                 </label>
               </div>
+              <details className="stacking-options">
+                <summary>Belt stacking <span>{config.inputStackSize > 1 || config.outputStackSize > 1 ? `${config.inputStackSize}× in · ${config.outputStackSize}× out` : "Optional · Space Age"}</span></summary>
+                <div className="field-pair">
+                  {[["inputStackSize", "Input stacks"], ["outputStackSize", "Output stacks"]].map(([key, label]) => (
+                    <label className="field" key={key}>
+                      {label}
+                      <select value={config[key]} onChange={(e) => update({ [key]: Number(e.target.value) })}>
+                        <option value={1}>Unstacked</option>
+                        {[2, 3, 4].map((size) => <option key={size} value={size}>{size} items high</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <p className="help">Inputs must arrive already stacked. Output stacking adds stack inserters to every machine, including intermediates. Input inserter speeds stay conservative.</p>
+                <p className="help">2 high requires Stack inserter research; 3 / 4 high require Transport belt capacity 1 / 2. Stack outputs wait for a full batch.</p>
+              </details>
+              {config.belt === "turbo-transport-belt" && <p className="help">Green belts require Space Age and Turbo transport belt research.</p>}
               <label className="check-row">
                 <input
                   type="checkbox"
@@ -309,17 +366,19 @@ export default function App() {
                 <h2>
                   <span className="step">03</span> Input supply
                 </h2>
-                <span className="unit">LIMIT / MIN</span>
+                <span className="unit">{config.rateUnit === "belts" ? "BELT LIMIT" : `LIMIT / ${config.rateUnit === "items/s" ? "SEC" : "MIN"}`}</span>
               </div>
               <p className="help">
                 Leave a limit blank for unlimited supply. Feed each listed item
                 at its marked belt entrance.
+                {config.inputStackSize > 1 && ` Supply all inputs in stacks of at least ${config.inputStackSize}.`}
+                {config.rateUnit === "belts" && ` 1 input belt = ${formatRate(inputScale / 60)} items/s at ${config.inputStackSize} item${config.inputStackSize === 1 ? "" : "s"} high.`}
               </p>
               {plan?.inputs.map((input) => (
                 <div className="input-row" key={input.name}>
                   <label htmlFor={`supply-${input.name}`}>
                     {title(input.name)}
-                    <small>Needs {formatRate(input.rate)} / min</small>
+                    <small>Needs {formatRate(input.rate / inputScale)} {config.rateUnit === "belts" ? "belts" : config.rateUnit === "items/s" ? "/ sec" : "/ min"}</small>
                   </label>
                   <input
                     aria-label={`${title(input.name)} supply limit`}
@@ -388,7 +447,7 @@ export default function App() {
                   <p className="eyebrow">LIVE BLUEPRINT</p>
                   <h2>
                     {plan
-                      ? plan.outputs
+                      ? plan.outputs.length > 3 ? `${plan.outputs.length} output targets` : plan.outputs
                           .map((output) => title(output.name))
                           .join(" + ")
                       : "Your production line"}
@@ -539,7 +598,7 @@ export default function App() {
                         <th>Recipe</th>
                         <th>Machine</th>
                         <th>Count</th>
-                        <th>Items / min</th>
+                        <th>{config.rateUnit === "belts" ? "Belts" : config.rateUnit === "items/s" ? "Items / sec" : "Items / min"}</th>
                         <th>
                           <span className="sr-only">Supply source</span>
                         </th>
@@ -600,7 +659,7 @@ export default function App() {
                             />
                           </td>
                           <td>
-                            {formatRate(unit.crafts * unit.results[0].amount)}
+                            {formatRate(unit.crafts * unit.results[0].amount / outputScale)}
                           </td>
                           <td>
                             {!config.outputs.some(
@@ -634,9 +693,9 @@ export default function App() {
               </section>
             )}
             <p className="scope-note">
-              {plan?.warnings[0] ||
+              {plan?.warnings.join(" ") ||
                 "Supports a curated catalog of vanilla solid-item recipes."}{" "}
-              Fluids, modules, quality, mining, and Space Age layouts are
+              Fluids, modules, quality, mining, and Space Age production recipes are
               outside this version.
             </p>
           </div>

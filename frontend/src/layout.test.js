@@ -21,6 +21,7 @@ const undergroundReach = {
   "underground-belt": 5,
   "fast-underground-belt": 7,
   "express-underground-belt": 9,
+  "turbo-underground-belt": 11,
 };
 const isTransport = (entity) =>
   entity && (entity.name.includes("belt") || entity.name.endsWith("splitter"));
@@ -209,8 +210,8 @@ function inspect(layout) {
     ).toBe(true);
   }
   const connected = new Set([poles[0].entity_number]);
-  for (let i = 0; i < poles.length; i++)
-    for (const [a, portA, b, portB] of layout.blueprint.blueprint.wires) {
+  const neighbors = new Map(poles.map((pole) => [pole.entity_number, []]));
+  for (const [a, portA, b, portB] of layout.blueprint.blueprint.wires) {
       expect([portA, portB]).toEqual([5, 5]);
       const source = entities[a - 1],
         target = entities[b - 1];
@@ -220,11 +221,17 @@ function inspect(layout) {
           source.position.y - target.position.y,
         ),
       ).toBeLessThanOrEqual(9);
-      if (connected.has(a) || connected.has(b)) {
-        connected.add(a);
-        connected.add(b);
-      }
+      neighbors.get(a).push(b);
+      neighbors.get(b).push(a);
+  }
+  const queue = [...connected];
+  while (queue.length) {
+    for (const neighbor of neighbors.get(queue.pop())) {
+      if (connected.has(neighbor)) continue;
+      connected.add(neighbor);
+      queue.push(neighbor);
     }
+  }
   expect(connected.size).toBe(poles.length);
 }
 
@@ -427,6 +434,57 @@ test("separate input and output materials safely share the same compact bus row"
   // output route, so row reuse cannot silently mix ore into the circuit exit.
   inspect(layout);
 });
+
+test.each(["standard", "compact"])("%s supports all 45 output targets with isolated routes and valid Space Age entities", (layoutMode) => {
+  const config = {
+    layoutMode, belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
+    fromOre: true, outputs: RECIPES.map((recipe) => ({ recipe: recipe.id, rate: 0.01 })),
+  };
+  const layout = build(config);
+  expect(layout.annotations.filter((a) => a.kind === "output")).toHaveLength(45);
+  inspect(layout);
+  const encoded = encodeBlueprint(layout.blueprint);
+  expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
+  expect(decodeBlueprint(encoded)).toEqual(layout.blueprint);
+}, 30000);
+
+test.each(["standard", "compact"])("%s stacked belts at the lane limit use stack inserters on every producer", (layoutMode) => {
+  for (const belt of Object.keys(BELTS)) {
+    for (const stackSize of [1, 2, 3, 4]) {
+      const config = {
+        belt, layoutMode, inputStackSize: stackSize, outputStackSize: stackSize,
+        outputs: [{ recipe: "copper-cable", rate: BELTS[belt].laneRate * stackSize }],
+      };
+      const layout = build(config);
+      inspect(layout);
+      const entities = layout.blueprint.blueprint.entities;
+      const machines = entities.filter((entity) => entity.recipe === "copper-cable");
+      const outputInserters = machines.map((machine) => entities.find((entity) => entity.position.x === machine.position.x + 2 && entity.position.y === machine.position.y));
+      for (const inserter of outputInserters) {
+        expect(inserter.name).toBe(stackSize > 1 ? "stack-inserter" : "fast-inserter");
+        expect(inserter.override_stack_size).toBe(stackSize > 1 ? stackSize : undefined);
+        expect(inserter.direction).toBe(12);
+      }
+      expect(entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(stackSize > 1 ? machines.length : 0);
+      expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({ ok: true, errors: [] });
+    }
+  }
+}, 30000);
+
+test("green stacked intermediates, furnaces, and three-ingredient machines keep every pickup connected", () => {
+  for (const outputStackSize of [2, 3, 4]) {
+    for (const recipe of RECIPES) {
+      const layout = build({
+        belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize, fromOre: true,
+        layoutMode: "compact", outputs: [{ recipe: recipe.id, rate: 1 }],
+      });
+      inspect(layout);
+      const entities = layout.blueprint.blueprint.entities;
+      expect(entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(entities.filter((entity) => size(entity)[0] === 3).length);
+      expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({ ok: true, errors: [] });
+    }
+  }
+}, 30000);
 
 test.each(Object.keys(BELTS))(
   "compact %s mixed-output routes survive varied column heights and external supplies",

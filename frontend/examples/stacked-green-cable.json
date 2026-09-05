@@ -1,0 +1,9 @@
+{
+  "outputs": [{ "recipe": "copper-cable", "rate": 0.5 }],
+  "rateUnit": "belts",
+  "belt": "turbo-transport-belt",
+  "inputStackSize": 4,
+  "outputStackSize": 4,
+  "inputLimits": { "copper-plate": 0.25 },
+  "layoutMode": "compact"
+}
