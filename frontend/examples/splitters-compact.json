@@ -1,0 +1,9 @@
+{
+  "outputs": [{ "recipe": "splitter", "rate": 84 }],
+  "assembler": "assembling-machine-3",
+  "belt": "express-transport-belt",
+  "intermediates": true,
+  "fromOre": true,
+  "maxMachines": 200,
+  "layoutMode": "compact"
+}

@@ -101,6 +101,7 @@ export default function App() {
       const imported = planHelmodString(helmod, {
         belt: config.belt,
         maxMachines: config.maxMachines,
+        layoutMode: config.layoutMode,
       });
       update({
         ...DEFAULT_CONFIG,
@@ -110,6 +111,7 @@ export default function App() {
         })),
         belt: config.belt,
         maxMachines: config.maxMachines,
+        layoutMode: config.layoutMode,
         fromOre: true,
         externalItems: imported.inputs.map((input) => input.name),
         machineOverrides: Object.fromEntries(
@@ -285,6 +287,22 @@ export default function App() {
                 />
                 Include electric smelting from ore
               </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={config.layoutMode === "compact"}
+                  onChange={(e) =>
+                    update({
+                      layoutMode: e.target.checked ? "compact" : "standard",
+                    })
+                  }
+                />
+                Compact layout
+              </label>
+              <p className="help">
+                Try a smaller footprint with the same production targets and
+                machine counts.
+              </p>
             </section>
             <section className="panel">
               <div className="section-heading">
@@ -490,7 +508,7 @@ export default function App() {
               <div className="export-actions">
                 <p>
                   {layout
-                    ? "Ready to take into your factory."
+                    ? `Footprint: ${layout.footprint.width} × ${layout.footprint.height} tiles`
                     : "Resolve the constraints to export."}
                 </p>
                 <button

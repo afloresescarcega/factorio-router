@@ -45,11 +45,35 @@ test("CLI accepts a native production plan with no Helmod", () => {
   );
 });
 
+test("CLI supports compact native configuration and --compact for both input formats", () => {
+  const input = { outputs: [{ recipe: "electronic-circuit", rate: 60 }] };
+  const standard = run(JSON.stringify(input), ["--plan"]);
+  const compact = run(JSON.stringify(input), ["--plan", "--compact"]);
+  const configured = run(JSON.stringify({ ...input, layoutMode: "compact" }), [
+    "--plan",
+  ]);
+  for (const result of [standard, compact, configured])
+    assert.equal(result.status, 0, result.stderr);
+  assert.equal(compact.stdout, configured.stdout);
+  assert.notEqual(compact.stdout, standard.stdout);
+  const compactHelmod = run(helmod, ["--compact", "--debug"]);
+  assert.equal(compactHelmod.status, 0, compactHelmod.stderr);
+  assert.match(compactHelmod.stderr, /"layoutMode": "compact"/);
+  assert.notEqual(compactHelmod.stdout, run(helmod).stdout);
+  assert.equal(
+    decodeBlueprint(compactHelmod.stdout.trim()).blueprint.entities.filter(
+      (entity) => entity.recipe === "iron-gear-wheel",
+    ).length,
+    1,
+  );
+});
+
 test("CLI fails cleanly on invalid or infeasible inputs without emitting a blueprint", () => {
   for (const [input, args] of [
     ["bad!", []],
     ["{", ["--plan"]],
     [JSON.stringify({ inputLimits: { "iron-plate": 0 } }), ["--plan"]],
+    [JSON.stringify({ layoutMode: "unknown" }), ["--plan"]],
   ]) {
     const result = run(input, args);
     assert.equal(result.status, 1);

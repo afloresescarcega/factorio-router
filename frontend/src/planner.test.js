@@ -16,6 +16,17 @@ test("sizes a circuit line from recipe times and expands cable demand", () => {
   expect(result.units.map((unit) => unit.count)).toEqual([2, 4]);
 });
 
+test("layout mode defaults to standard and does not change production sizing", () => {
+  const standard = plan({});
+  const compact = plan({ layoutMode: "compact" });
+  expect(standard.layoutMode).toBe("standard");
+  expect(compact).toEqual({ ...standard, layoutMode: "compact" });
+  expect(plan({ layoutMode: undefined }).layoutMode).toBe("standard");
+  expect(() => plan({ layoutMode: "unknown" })).toThrow(
+    /standard or compact layout/,
+  );
+});
+
 test("merges shared intermediate demand and preserves requested surplus output", () => {
   const result = plan({
     outputs: [

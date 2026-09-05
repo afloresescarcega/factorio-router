@@ -101,7 +101,7 @@ function Entity({ entity }) {
 
 export default function BlueprintPreview({ layout }) {
   const [zoom, setZoom] = useState(1);
-  const { bounds, blueprint, annotations } = layout;
+  const { bounds, blueprint, annotations, footprint } = layout;
   const width = bounds.right - bounds.left + 1,
     height = bounds.bottom - bounds.top + 1;
   const entityByNumber = new Map(
@@ -116,7 +116,7 @@ export default function BlueprintPreview({ layout }) {
         <span>
           Entity view{" "}
           <span className="muted">
-            · {width} × {height} tiles
+            · {footprint.width} × {footprint.height} tiles
           </span>
         </span>
         <div className="zoom-controls">

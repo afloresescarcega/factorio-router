@@ -9,9 +9,12 @@ import { validateBlueprintString } from "./validator/validate.mjs";
 
 try {
   const input = readFileSync(0, "utf8").trim();
+  const overrides = process.argv.includes("--compact")
+    ? { layoutMode: "compact" }
+    : {};
   const plan = process.argv.includes("--plan")
-    ? planProduction({ ...DEFAULT_CONFIG, ...JSON.parse(input) })
-    : planHelmodString(input);
+    ? planProduction({ ...DEFAULT_CONFIG, ...JSON.parse(input), ...overrides })
+    : planHelmodString(input, overrides);
   const layout = createLayout(plan);
   const encoded = encodeBlueprint(layout.blueprint);
   const result = validateBlueprintString(encoded);

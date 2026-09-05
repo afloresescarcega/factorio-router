@@ -14,6 +14,7 @@ Configure a production line, inspect its layout, and export a Factorio 2.0 bluep
 - Set multiple output targets and available input rates.
 - Build intermediate products automatically or supply them externally.
 - Choose machine and belt tiers, enforce a machine budget, and override counts per recipe.
+- Enable optional compact placement to reduce the blueprint footprint while preserving production targets and machine counts.
 - Inspect the exact exported layout with zoom, input/output labels, and a complete build list.
 - Copy or download a blueprint string. Optional Helmod imports become editable in the same planner.
 
@@ -32,9 +33,9 @@ Open the local URL printed by Vite. `npm run build` produces a static site in `f
 ## Plan a line
 
 1. Choose one or more outputs and their target rates in **items per minute**.
-2. Choose an assembler tier, belt tier, and total machine budget. Enable automatic intermediates to include recipes such as gears and cable. Enable electric smelting to start from ore.
+2. Choose an assembler tier, belt tier, and total machine budget. Enable automatic intermediates to include recipes such as gears and cable. Enable electric smelting to start from ore. Turn on **Compact layout** to try tighter placement; leave it off for the original layout.
 3. Enter available input rates, or leave them blank for unlimited supply. You can supply any intermediate externally from the production table.
-4. Inspect the generated machines, belts, crossings, inserters, and power network. Zoom and scroll to inspect details; input and output entrances are labeled. The build list shows all required entities.
+4. Inspect the generated machines, belts, crossings, inserters, and power network. Zoom and scroll to inspect details; input and output entrances are labeled. The build list shows all required entities. The footprint below the preview shows the exported layout's width and height in tiles, so you can compare standard and compact placement.
 5. Copy or download the blueprint string and import it through Factorio's blueprint library. Connect power and supply each marked input.
 
 Changes recalculate the plan and preview together. Machine counts are sized automatically and may be overridden per recipe. Invalid targets and insufficient input, belt, or machine capacity block export; correcting them regenerates it. The app never retains an old blueprint as though it matched an invalid configuration.
@@ -44,7 +45,7 @@ Changes recalculate the plan and preview together. Machine counts are sized auto
 - A curated catalog of **45 vanilla Factorio 2.0.72 recipes**, using solid ingredients and one solid result. Each recipe has at most three ingredient types.
 - Assembling machines 1–3 and electric furnaces, at normal quality, without modules or beacons. Manufacturing a mining drill or pump as an item is supported; placing it to mine or pump is not.
 - Yellow, red, and blue transport belts. Each material has its own eastbound bus. Local producers feed downstream consumers; final output continues to the right edge.
-- Recipes are ordered by dependency. Columns wrap after 12 machines; the total budget cannot exceed 200 machines.
+- Recipes are ordered by dependency. Standard columns wrap after 12 machines; the total budget cannot exceed 200 machines. Optional compact placement uses tighter machine and bus spacing, fits column widths to their ingredient lanes, compares column heights, and reuses bus rows for material runs that do not overlap. It preserves machine counts and throughput assumptions; it does not guarantee the smallest possible factory.
 - The layout uses one fast input inserter for the first ingredient, long-handed inserters for the next two, and a fast output inserter. Machine sizing takes the maximum required by crafting time and conservative transfer budgets: **90 items/min per fast inserter and 45 items/min per long-handed inserter**, without hand-capacity research. This deliberately uses more machines than a pure recipe calculator for some fast recipes.
 - Side-loading and splitter branches use a single belt lane, so throughput budgets are **450 / 900 / 1,350 items/min per material**, depending on the belt tier. Multiple bus crossings use separate short underground pairs rather than silently dropping materials.
 - Input limits describe available supply; they do not add circuit-controlled rate limiters. Rates are planning estimates, not a tick-by-tick simulation. Actual output depends on sufficient power, supply, and belt loading. Layout geometry and connectivity have automated verification, but these blueprints still need in-game acceptance and throughput testing.
@@ -62,9 +63,13 @@ The same JavaScript planner is available from the CLI:
 cd frontend
 node cli.mjs --plan < examples/circuits.json
 node cli.mjs --plan < examples/science.json
+node cli.mjs --plan --compact < examples/science.json
+node cli.mjs --plan < examples/splitters-compact.json
 ```
 
-Without `--plan`, the CLI reads a Helmod export from standard input. `--debug` writes plan and blueprint JSON to stderr; stdout always contains only the blueprint string. Exit status is nonzero for invalid or infeasible plans. The old export sample is retained in `examples/legacy-helmod.txt`; its burner factories are intentionally outside the supported scope.
+The splitter example makes **84 splitters/min from ore**, using assembling machines 3 and blue belts. Both layouts use **113 machines**: standard placement occupies **264 × 97 tiles**, while compact placement occupies **121 × 42 tiles**, about **80% less bounding area**. These dimensions describe the exported entities; machine sizing and the assumptions above apply equally to both layouts.
+
+Without `--plan`, the CLI reads a Helmod export from standard input. Add `--compact` to either input format to request compact placement, or set `"layoutMode": "compact"` in a native JSON plan. The default is `"standard"`. The Helmod adapter also accepts `processHelmodString(exportString, { layoutMode: "compact" })`, and importing a Helmod line in the app keeps the current layout selection. `--debug` writes plan and blueprint JSON to stderr; stdout always contains only the blueprint string. Exit status is nonzero for invalid or infeasible plans. The old export sample is retained in `examples/legacy-helmod.txt`; its burner factories are intentionally outside the supported scope.
 
 The previous Python prototype has been retired. Its source remains in Git history; it no longer needs separate dependencies or CI. Helmod decoding remains an optional adapter to the shared JavaScript engine.
 

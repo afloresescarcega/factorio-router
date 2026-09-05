@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   outputs: [{ recipe: "electronic-circuit", rate: 60 }],
   assembler: "assembling-machine-2",
   belt: "transport-belt",
+  layoutMode: "standard",
   maxMachines: 200,
   intermediates: true,
   fromOre: false,
@@ -105,6 +106,9 @@ function orderedUnits(units) {
 export function finishPlan(units, inputs, outputs, config = {}) {
   const belt = config.belt || DEFAULT_CONFIG.belt;
   if (!BELTS[belt]) throw new Error("Choose a supported belt tier.");
+  const layoutMode = config.layoutMode ?? DEFAULT_CONFIG.layoutMode;
+  if (!["standard", "compact"].includes(layoutMode))
+    throw new Error("Choose a standard or compact layout.");
   const maxMachines = Number(config.maxMachines ?? 200);
   const ordered = orderedUnits(units.map(validateUnit));
   const machineCount = ordered.reduce((sum, unit) => sum + unit.count, 0);
@@ -148,6 +152,7 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     outputs,
     machineCount,
     belt,
+    layoutMode,
     issues,
     warnings: [
       "Sizing includes conservative inserter budgets (90 items/min for fast, 45 for long-handed). Normal quality, no modules. Actual belt loading can affect throughput; verify the line in Factorio.",

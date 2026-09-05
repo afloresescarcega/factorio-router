@@ -86,8 +86,7 @@ export function planHelmodString(helmodString, config = {}) {
   return finishPlan(units, inputs, outputs, config);
 }
 
-export function processHelmodString(helmodString) {
-  return encodeBlueprint(
-    createLayout(planHelmodString(helmodString)).blueprint,
-  );
+export function processHelmodString(helmodString, config = {}) {
+  const plan = planHelmodString(helmodString, config);
+  return encodeBlueprint(createLayout(plan).blueprint);
 }

@@ -28,6 +28,11 @@ The Helmod-compatible CLI remains available for scripted imports:
 
 ```sh
 node cli.mjs < helmod-export.txt > blueprint.txt
+node cli.mjs --compact < helmod-export.txt > compact-blueprint.txt
 ```
+
+The app's **Compact layout** option and the CLI's `--compact` flag use the same
+optional placement strategy. Native JSON plans also accept
+`"layoutMode": "compact"`; the default remains `"standard"`.
 
 For the complete native workflow, CLI examples, supported recipes, and layout assumptions, see the [project README](../README.md).

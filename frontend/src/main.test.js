@@ -1,6 +1,7 @@
 import { HelmodFactory } from "./helmodFactory.js";
 import { decodeBlueprint } from "./blueprintFactory.js";
 import { planHelmodString, processHelmodString } from "./main.js";
+import { createLayout } from "./layout.js";
 
 const encode = (units) =>
   HelmodFactory.encodeHelmod({
@@ -21,6 +22,20 @@ test("Helmod is an optional adapter to the shared 2.0 layout", () => {
     blueprint.entities.filter((e) => e.recipe === "iron-gear-wheel"),
   ).toHaveLength(2);
   expect(blueprint.entities.some((e) => e.direction === 12)).toBe(true);
+});
+
+test("Helmod compact exports use the selected layout and preserve machine counts", () => {
+  const encoded = encode([["iron-gear-wheel", "assembling-machine-1", 3]]);
+  const plan = planHelmodString(encoded, { layoutMode: "compact" });
+  expect(plan.layoutMode).toBe("compact");
+  const compact = decodeBlueprint(
+    processHelmodString(encoded, { layoutMode: "compact" }),
+  );
+  expect(compact).toEqual(createLayout(plan, { compact: true }).blueprint);
+  expect(
+    compact.blueprint.entities.filter((entity) => entity.recipe),
+  ).toHaveLength(3);
+  expect(compact).not.toEqual(decodeBlueprint(processHelmodString(encoded)));
 });
 
 test.each(["", "invalid export !!!"])(

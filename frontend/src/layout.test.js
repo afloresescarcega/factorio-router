@@ -1,5 +1,5 @@
 import { RECIPES } from "./recipeCatalog.js";
-import { DEFAULT_CONFIG, planProduction } from "./planner.js";
+import { BELTS, DEFAULT_CONFIG, planProduction } from "./planner.js";
 import { createLayout } from "./layout.js";
 import { encodeBlueprint, decodeBlueprint } from "./blueprintFactory.js";
 import { validateBlueprintString } from "../validator/validate.mjs";
@@ -11,12 +11,52 @@ const size = (entity) =>
   entity.name === "electric-furnace"
     ? [3, 3]
     : entity.name.endsWith("splitter")
-      ? [1, 2]
+      ? entity.direction === 4 || entity.direction === 12
+        ? [1, 2]
+        : [2, 1]
       : [1, 1];
-const build = (patch) =>
-  createLayout(planProduction({ ...DEFAULT_CONFIG, ...patch }));
+const build = (patch, options) =>
+  createLayout(planProduction({ ...DEFAULT_CONFIG, ...patch }), options);
+const undergroundReach = {
+  "underground-belt": 5,
+  "fast-underground-belt": 7,
+  "express-underground-belt": 9,
+};
+const isTransport = (entity) =>
+  entity && (entity.name.includes("belt") || entity.name.endsWith("splitter"));
+
+function measuredFootprint(layout) {
+  const edges = layout.blueprint.blueprint.entities.map((entity) => {
+    const [width, height] = size(entity);
+    return {
+      left: entity.position.x - width / 2,
+      right: entity.position.x + width / 2,
+      top: entity.position.y - height / 2,
+      bottom: entity.position.y + height / 2,
+    };
+  });
+  const width =
+    Math.max(...edges.map((edge) => edge.right)) -
+    Math.min(...edges.map((edge) => edge.left));
+  const height =
+    Math.max(...edges.map((edge) => edge.bottom)) -
+    Math.min(...edges.map((edge) => edge.top));
+  return { width, height, area: width * height };
+}
+const footprint = (layout) => measuredFootprint(layout).area;
+
+function machineCounts(layout) {
+  return layout.blueprint.blueprint.entities
+    .filter((entity) => size(entity)[0] === 3)
+    .reduce((counts, entity) => {
+      const id = `${entity.name}:${entity.recipe || "smelting"}`;
+      counts[id] = (counts[id] || 0) + 1;
+      return counts;
+    }, {});
+}
 
 function inspect(layout) {
+  expect(layout.footprint).toEqual(measuredFootprint(layout));
   const entities = layout.blueprint.blueprint.entities;
   const tiles = new Map();
   for (const entity of entities) {
@@ -32,16 +72,19 @@ function inspect(layout) {
       }
   }
   // Build a directed transport graph from the exported entities alone.
-  const next = new Map();
-  for (const entity of entities.filter(
-    (e) => e.name.includes("belt") || e.name.endsWith("splitter"),
-  )) {
+  const next = new Map(),
+    pairedOutputs = new Set();
+  for (const entity of entities.filter(isTransport)) {
     const [dx, dy] = vector[entity.direction];
     const { x, y } = entity.position;
     let destinations;
     if (entity.type === "input") {
       const matches = [];
-      for (let distance = 2; distance <= 5; distance++) {
+      for (
+        let distance = 1;
+        distance <= undergroundReach[entity.name];
+        distance++
+      ) {
         const target = tiles.get(key(x + dx * distance, y + dy * distance));
         if (
           target?.type === "output" &&
@@ -53,23 +96,32 @@ function inspect(layout) {
         }
       }
       expect(matches, `unpaired underground ${x},${y}`).toHaveLength(1);
+      expect(
+        pairedOutputs.has(matches[0].entity_number),
+        `underground output paired twice at ${x},${y}`,
+      ).toBe(false);
+      pairedOutputs.add(matches[0].entity_number);
       destinations = matches;
     } else if (entity.name.endsWith("splitter")) {
       destinations = [
-        tiles.get(key(x + 1, y - 0.5)),
-        tiles.get(key(x + 1, y + 0.5)),
+        tiles.get(key(x + dx - dy * 0.5, y + dy + dx * 0.5)),
+        tiles.get(key(x + dx + dy * 0.5, y + dy - dx * 0.5)),
       ];
     } else destinations = [tiles.get(key(x + dx, y + dy))];
     next.set(
       entity.entity_number,
       destinations.filter(
         (e) =>
-          e &&
-          (e.name.includes("belt") || e.name.endsWith("splitter")) &&
+          isTransport(e) &&
           e.direction !== (entity.direction + 8) % 16,
       ),
     );
   }
+  for (const entity of entities.filter((e) => e.type === "output"))
+    expect(
+      pairedOutputs.has(entity.entity_number),
+      `unpaired underground output ${entity.entity_number}`,
+    ).toBe(true);
   function reachable(starts) {
     const seen = new Set(),
       queue = [...starts];
@@ -82,12 +134,14 @@ function inspect(layout) {
     return seen;
   }
   const inputsByItem = new Map();
-  for (const annotation of layout.annotations.filter((a) => a.kind === "input"))
-    inputsByItem.set(annotation.item, [
-      tiles.get(key(annotation.x + 0.5, annotation.y + 0.5)),
-    ]);
-  const requiredPickups = [],
-    outputDrops = [];
+  for (const annotation of layout.annotations.filter((a) => a.kind === "input")) {
+    const input = tiles.get(key(annotation.x + 0.5, annotation.y + 0.5));
+    expect(isTransport(input), `missing input ${annotation.item}`).toBe(true);
+    const starts = inputsByItem.get(annotation.item) || [];
+    starts.push(input);
+    inputsByItem.set(annotation.item, starts);
+  }
+  const requiredPickups = [];
   for (const entity of entities.filter((e) => e.name.includes("inserter"))) {
     const [dx, dy] = vector[entity.direction];
     const reach = entity.name === "long-handed-inserter" ? 2 : 1;
@@ -111,7 +165,6 @@ function inspect(layout) {
       const starts = inputsByItem.get(recipe) || [];
       starts.push(drop);
       inputsByItem.set(recipe, starts);
-      outputDrops.push(drop);
     } else {
       const data = RECIPES.find((r) => r.id === recipe);
       const index =
@@ -119,23 +172,27 @@ function inspect(layout) {
       requiredPickups.push({ item: data.ingredients[index].name, pickup });
     }
   }
+  for (const { item } of requiredPickups)
+    expect(inputsByItem.has(item), `missing material source ${item}`).toBe(true);
   for (const [item, starts] of inputsByItem) {
-    const reachableTiles = reachable(starts);
-    for (const required of requiredPickups)
-      expect(
-        reachableTiles.has(required.pickup.entity_number),
-        `${item} route to ${required.item}`,
-      ).toBe(required.item === item);
-    const output = layout.annotations.find(
-      (a) => a.kind === "output" && a.item === item,
-    );
-    if (output)
-      expect(
-        reachableTiles.has(
-          tiles.get(key(output.x + 0.5, output.y + 0.5)).entity_number,
-        ),
-        `missing final output ${item}`,
-      ).toBe(true);
+    // Each producer must deliver, including every wrapped producer column.
+    // Taking the union of all producers could hide a disconnected output belt.
+    for (const start of starts) {
+      const reachableTiles = reachable([start]);
+      for (const required of requiredPickups)
+        expect(
+          reachableTiles.has(required.pickup.entity_number),
+          `${item} from ${start.entity_number} route to ${required.item}`,
+        ).toBe(required.item === item);
+      for (const output of layout.annotations.filter((a) => a.kind === "output")) {
+        const exit = tiles.get(key(output.x + 0.5, output.y + 0.5));
+        expect(isTransport(exit), `missing output ${output.item}`).toBe(true);
+        expect(
+          reachableTiles.has(exit.entity_number),
+          `${item} from ${start.entity_number} route to final output ${output.item}`,
+        ).toBe(output.item === item);
+      }
+    }
   }
   const poles = entities.filter((e) => e.name === "medium-electric-pole");
   for (const powered of entities.filter(
@@ -230,3 +287,201 @@ test("electric furnaces choose recipes from input and exports use 2.0 directions
     if (entity.direction !== undefined)
       expect([0, 4, 8, 12]).toContain(entity.direction);
 });
+
+test.each(Object.keys(BELTS))(
+  "compact %s layouts keep every catalog recipe connected and isolated",
+  (belt) => {
+    for (const recipe of RECIPES) {
+      const config = {
+        outputs: [{ recipe: recipe.id, rate: 1 }],
+        belt,
+        fromOre: true,
+      };
+      const layout = build(config, { compact: true });
+      const standard = build(config);
+      inspect(layout);
+      expect(machineCounts(layout), recipe.id).toEqual(
+        machineCounts(standard),
+      );
+      expect(footprint(layout), recipe.id).toBeLessThanOrEqual(footprint(standard));
+      expect(
+        validateBlueprintString(encodeBlueprint(layout.blueprint)),
+        recipe.id,
+      ).toEqual({ ok: true, errors: [] });
+    }
+  },
+);
+
+test.each(Object.keys(BELTS))(
+  "compact %s wrapped columns connect all producers and all three ingredients",
+  (belt) => {
+    const config = {
+      outputs: [
+        { recipe: "splitter", rate: 10 },
+        { recipe: "electronic-circuit", rate: 5 },
+      ],
+      machineOverrides: {
+        "electronic-circuit": { count: 30 },
+        splitter: { count: 30 },
+        "copper-cable": { count: 25 },
+      },
+      belt,
+      fromOre: true,
+    };
+    const layout = build(config, { compact: true });
+    expect(machineCounts(layout)).toEqual(machineCounts(build(config)));
+    for (const recipe of ["splitter", "electronic-circuit", "copper-cable"])
+      expect(
+        layout.annotations.filter(
+          (annotation) =>
+            annotation.kind === "machine" && annotation.item === recipe,
+        ).length,
+        `wrapped ${recipe}`,
+      ).toBeGreaterThan(1);
+    inspect(layout);
+  },
+);
+
+// Reproduces the supplied blueprint without committing its encoded entity data.
+const suppliedSplitterConfig = {
+  outputs: [{ recipe: "splitter", rate: 84 }],
+  assembler: "assembling-machine-3",
+  belt: "express-transport-belt",
+  fromOre: true,
+};
+
+test("compact layout substantially reduces the supplied splitter factory footprint", () => {
+  const spacious = build(suppliedSplitterConfig);
+  const compact = build(suppliedSplitterConfig, { compact: true });
+  expect(machineCounts(compact)).toEqual(machineCounts(spacious));
+  expect(
+    Object.values(machineCounts(compact)).reduce((sum, count) => sum + count, 0),
+  ).toBe(113);
+  // Measure actual exported entity extents, independent of preview bounds.
+  expect(footprint(compact)).toBeLessThan(footprint(spacious) * 0.75);
+  expect(
+    compact.blueprint.blueprint.entities.filter(isTransport).length,
+  ).toBeLessThan(spacious.blueprint.blueprint.entities.filter(isTransport).length);
+  inspect(compact);
+  const encoded = encodeBlueprint(compact.blueprint);
+  expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
+  expect(decodeBlueprint(encoded)).toEqual(compact.blueprint);
+});
+
+test("compact mode is opt-in, deterministic, and does not mutate the plan", () => {
+  const plan = planProduction({ ...DEFAULT_CONFIG, ...suppliedSplitterConfig });
+  const original = structuredClone(plan);
+  const spacious = createLayout(plan);
+  const compact = createLayout(plan, { compact: true });
+  expect(createLayout(plan, { compact: false })).toEqual(spacious);
+  expect(createLayout(plan, { compact: true })).toEqual(compact);
+  expect(createLayout(plan)).toEqual(spacious);
+  expect(plan).toEqual(original);
+});
+
+test("compact mode rejects production plans with insufficient belt capacity", () => {
+  const plan = planProduction({
+    ...DEFAULT_CONFIG,
+    ...suppliedSplitterConfig,
+    belt: "transport-belt",
+  });
+  expect(plan.issues.length).toBeGreaterThan(0);
+  expect(() => createLayout(plan, { compact: true })).toThrow(
+    plan.issues.join(" "),
+  );
+});
+
+test("neighboring three-ingredient columns preserve their shared ingredient branches", () => {
+  // Iron is the turret's east-side third input and the next machine's second
+  // input. Their splitter branches must remain separate despite sharing a bus.
+  const layout = build(
+    {
+      outputs: [
+        { recipe: "gun-turret", rate: 1 },
+        { recipe: "fast-inserter", rate: 1 },
+      ],
+      intermediates: false,
+    },
+    { compact: true },
+  );
+  expect(layout.annotations.filter((a) => a.kind === "machine")).toHaveLength(2);
+  inspect(layout);
+});
+
+test("separate input and output materials safely share the same compact bus row", () => {
+  const layout = build(
+    {
+      outputs: [{ recipe: "electronic-circuit", rate: 1 }],
+      fromOre: true,
+    },
+    { compact: true },
+  );
+  const input = layout.annotations.find(
+    (a) => a.kind === "input" && a.item === "iron-ore",
+  );
+  const output = layout.annotations.find(
+    (a) => a.kind === "output" && a.item === "electronic-circuit",
+  );
+  expect(input.y).toBe(output.y);
+  // The graph inspector checks both required routes and every forbidden final
+  // output route, so row reuse cannot silently mix ore into the circuit exit.
+  inspect(layout);
+});
+
+test.each(Object.keys(BELTS))(
+  "compact %s mixed-output routes survive varied column heights and external supplies",
+  (belt) => {
+    const cases = [
+      {
+        outputs: ["gun-turret", "fast-inserter", "medium-electric-pole"],
+        fromOre: true,
+      },
+      {
+        outputs: ["military-science-pack", "advanced-circuit", "substation"],
+        fromOre: false,
+      },
+      {
+        outputs: [
+          "logistic-science-pack",
+          "automation-science-pack",
+          "electronic-circuit",
+        ],
+        fromOre: true,
+        externalItems: ["iron-gear-wheel"],
+      },
+      {
+        outputs: ["splitter", "fast-splitter", "long-handed-inserter"],
+        fromOre: true,
+        externalItems: ["copper-cable"],
+      },
+    ];
+    for (const [caseIndex, scenario] of cases.entries()) {
+      const config = {
+        ...DEFAULT_CONFIG,
+        ...scenario,
+        belt,
+        outputs: scenario.outputs.map((recipe) => ({ recipe, rate: 1 })),
+      };
+      const initial = planProduction(config);
+      const counts = [1, 2, 3, 7, 13];
+      config.machineOverrides = Object.fromEntries(
+        initial.units.map((unit, index) => [
+          unit.recipe,
+          {
+            count: Math.max(
+              unit.required,
+              counts[(index + caseIndex) % counts.length],
+            ),
+          },
+        ]),
+      );
+      const plan = planProduction(config);
+      expect(plan.issues, scenario.outputs.join(", ")).toEqual([]);
+      const layout = createLayout(plan, { compact: true });
+      const standard = createLayout(plan, { compact: false });
+      expect(machineCounts(layout)).toEqual(machineCounts(standard));
+      expect(footprint(layout)).toBeLessThanOrEqual(footprint(standard));
+      inspect(layout);
+    }
+  },
+);
