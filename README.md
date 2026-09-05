@@ -5,6 +5,7 @@ Configure a production line, inspect its layout, and export a Factorio 2.0 bluep
 [**Open Factorio Router →**](https://afloresescarcega.github.io/factorio-router/)
 
 [![GitHub Pages deployment](https://github.com/afloresescarcega/factorio-router/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/afloresescarcega/factorio-router/actions/workflows/deploy-pages.yml)
+[![Quality Gate Status](https://sonarqube.us/api/project_badges/measure?project=afloresescarcega_factorio-router&metric=alert_status)](https://sonarqube.us/summary/new_code?id=afloresescarcega_factorio-router)
 
 ![Factorio Router showing output targets, input supply limits, machine settings, and a generated electronic-circuit blueprint](docs/images/factorio-router.jpg)
 
