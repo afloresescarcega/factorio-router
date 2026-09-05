@@ -1,11 +1,12 @@
 body {
   margin: 0;
+  background: #201810;
   font-family: inherit;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: ui-monospace, source-code-pro, Menlo, Monaco, Consolas,
+    "Courier New", monospace;
 }

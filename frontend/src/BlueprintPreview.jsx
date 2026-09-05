@@ -3,11 +3,13 @@ import { entitySize } from "./layout.js";
 import { title } from "./planner.js";
 
 const COLORS = {
-  machine: "#648989",
-  belt: "#b09a55",
-  inserter: "#72a9cd",
-  pole: "#d7a9df",
+  machine: "#6ba0a0",
+  belt: "#e0b348",
+  inserter: "#4f9fd6",
+  pole: "#c98ad6",
 };
+const WIRE = "#c8763a";
+const GRID = "#372f27";
 function Entity({ entity }) {
   const [w, h] = entitySize(entity);
   const { x, y } = entity.position;
@@ -48,7 +50,7 @@ function Entity({ entity }) {
             width="1.6"
             height="1.6"
             rx=".12"
-            fill="#16232b"
+            fill="#181310"
             fillOpacity=".7"
           />
           <text
@@ -56,7 +58,7 @@ function Entity({ entity }) {
             y={y + 0.15}
             textAnchor="middle"
             fontSize=".44"
-            fill="#e8f4f0"
+            fill="#ffe6c0"
           >
             {entity.name === "electric-furnace"
               ? "EF"
@@ -64,7 +66,7 @@ function Entity({ entity }) {
           </text>
         </>
       )}
-      {pole && <circle cx={x} cy={y} r=".15" fill="#1c2630" />}
+      {pole && <circle cx={x} cy={y} r=".15" fill="#1a1512" />}
       {!machine && !pole && (
         <g
           transform={`translate(${x} ${y}) rotate(${((entity.direction || 0) + (inserter ? 8 : 0)) * 22.5})`}
@@ -80,14 +82,14 @@ function Entity({ entity }) {
             <path
               d="M-.2 .13 L0 -.13 L.2 .13"
               fill="none"
-              stroke="#eadcab"
+              stroke="#ffe6c0"
               strokeWidth=".09"
             />
           )}
           {underground && (
             <path
               d={entity.type === "input" ? "M-.3 -.33 H.3" : "M-.3 .33 H.3"}
-              stroke="#f9e8a6"
+              stroke="#ffd98a"
               strokeWidth=".15"
             />
           )}
@@ -162,7 +164,7 @@ export default function BlueprintPreview({ layout }) {
               <path
                 d="M1 0H0V1"
                 fill="none"
-                stroke="#27343c"
+                stroke={GRID}
                 strokeWidth=".045"
               />
             </pattern>
@@ -181,7 +183,7 @@ export default function BlueprintPreview({ layout }) {
               y1={entityByNumber.get(a).position.y}
               x2={entityByNumber.get(b).position.x}
               y2={entityByNumber.get(b).position.y}
-              stroke="#b78b69"
+              stroke={WIRE}
               strokeWidth=".07"
               opacity=".7"
             />
@@ -198,7 +200,7 @@ export default function BlueprintPreview({ layout }) {
                   cy={a.y + 0.5}
                   r=".48"
                   fill="none"
-                  stroke={a.kind === "input" ? "#8ccec2" : "#edc06c"}
+                  stroke={a.kind === "input" ? "#7fcf83" : "#f9b44b"}
                   strokeWidth=".16"
                 />
                 <title>
@@ -208,7 +210,7 @@ export default function BlueprintPreview({ layout }) {
                   x={a.x + 0.5}
                   y={a.y - 0.45}
                   textAnchor={a.kind === "input" ? "start" : "end"}
-                  fill={a.kind === "input" ? "#8ccec2" : "#edc06c"}
+                  fill={a.kind === "input" ? "#7fcf83" : "#f9b44b"}
                   fontSize=".8"
                 >
                   {title(a.item)}

@@ -1,10 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="10" fill="#edbc63"/>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffdf9b"/>
+      <stop offset=".55" stop-color="#e6a93c"/>
+      <stop offset="1" stop-color="#bc8324"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="9" fill="#1a1410"/>
+  <rect x="4" y="4" width="56" height="56" rx="6" fill="url(#plate)"/>
+  <rect x="4" y="4" width="56" height="56" rx="6" fill="none" stroke="#6d4a12" stroke-width="2"/>
   <path
-    d="M13 53V19h34m-8-6 8 6-8 6"
+    d="M15 51V21h29m-8-7 8 7-8 7"
     fill="none"
-    stroke="#1b2225"
-    stroke-width="3"
+    stroke="#2a1c07"
+    stroke-width="5.5"
     stroke-linecap="square"
     stroke-linejoin="miter"
   />
