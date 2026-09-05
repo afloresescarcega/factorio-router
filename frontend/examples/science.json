@@ -1,0 +1,11 @@
+{
+  "outputs": [
+    { "recipe": "automation-science-pack", "rate": 20 },
+    { "recipe": "logistic-science-pack", "rate": 20 }
+  ],
+  "assembler": "assembling-machine-2",
+  "belt": "transport-belt",
+  "intermediates": true,
+  "fromOre": true,
+  "maxMachines": 100
+}

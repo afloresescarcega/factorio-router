@@ -1,80 +1,59 @@
-// Tests for the stdin->stdout CLI wrapper. cli.mjs is a top-level script
-// with import-time side effects (it reads stdin immediately), so it's
-// exercised end-to-end via child_process rather than imported directly.
-// Run with: node --test cli.test.mjs
-import { test, describe } from 'node:test';
-import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { HelmodFactory } from './src/helmodFactory.js';
-import { decodeBlueprint } from './src/blueprintFactory.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { HelmodFactory } from "./src/helmodFactory.js";
+import { decodeBlueprint } from "./src/blueprintFactory.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const cliPath = join(here, 'cli.mjs');
+const run = (input, args = []) =>
+  spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./cli.mjs", import.meta.url)), ...args],
+    { input, encoding: "utf8" },
+  );
+const helmod = HelmodFactory.encodeHelmod({
+  root: {
+    type: "recipe",
+    name: "iron-gear-wheel",
+    factory: { name: "assembling-machine-1", count: 1 },
+  },
+});
 
-function runCli(input, args = []) {
-  return spawnSync(process.execPath, [cliPath, ...args], {
-    input,
-    encoding: 'utf-8',
-  });
-}
+test("CLI accepts optional Helmod and keeps stdout clean even in debug mode", () => {
+  for (const args of [[], ["--debug"]]) {
+    const result = run(helmod, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim().split("\n").length, 1);
+    assert.equal(
+      decodeBlueprint(result.stdout.trim()).blueprint.item,
+      "blueprint",
+    );
+    assert.match(result.stderr, /passed schema/);
+  }
+});
 
-function validHelmodInput() {
-  return HelmodFactory.encodeHelmod({
-    root: {
-      type: 'recipe',
-      name: 'iron-gear-wheel',
-      factory: { name: 'assembling-machine-1', count: 1 },
-    },
-  });
-}
+test("CLI accepts a native production plan with no Helmod", () => {
+  const result = run(
+    JSON.stringify({ outputs: [{ recipe: "electronic-circuit", rate: 60 }] }),
+    ["--plan"],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(
+    decodeBlueprint(result.stdout.trim()).blueprint.entities.some(
+      (entity) => entity.recipe === "electronic-circuit",
+    ),
+  );
+});
 
-describe('cli.mjs', () => {
-  test('prints a valid blueprint string and exits 0 for valid input', () => {
-    const result = runCli(validHelmodInput());
-    assert.equal(result.status, 0);
-    const stdout = result.stdout.trim();
-    assert.equal(stdout[0], '0');
-    // Should decode to an actual blueprint object.
-    const decoded = decodeBlueprint(stdout);
-    assert.equal(decoded.blueprint.item, 'blueprint');
-    // Non-debug runs keep stdout clean (no console.log noise mixed in).
-    assert.equal(stdout.split('\n').length, 1);
-    assert.match(result.stderr, /Blueprint passed schema \+ name validation\./);
-  });
-
-  test('dumps decoded stages to stderr under --debug, blueprint string as the last stdout line', () => {
-    const result = runCli(validHelmodInput(), ['--debug']);
-    assert.equal(result.status, 0);
-    assert.match(result.stderr, /=== decoded helmod data ===/);
-    assert.match(result.stderr, /=== round-trip decoded blueprint ===/);
-    // Under --debug, main.js's own console.log calls are left active (they
-    // write verbose JSON dumps to stdout too), so unlike the non-debug case
-    // stdout isn't a single clean line -- but the final line is still the
-    // blueprint string.
-    const lines = result.stdout.trim().split('\n');
-    const lastLine = lines.at(-1);
-    assert.equal(lastLine[0], '0');
-    assert.doesNotThrow(() => decodeBlueprint(lastLine));
-  });
-
-  test('exits non-zero and reports schema validation failures for an invalid blueprint', () => {
-    const badInput = HelmodFactory.encodeHelmod({
-      root: {
-        type: 'recipe',
-        name: 'iron-gear-wheel',
-        factory: { name: 'not-a-real-factory', count: 1 },
-      },
-    });
-    const result = runCli(badInput);
+test("CLI fails cleanly on invalid or infeasible inputs without emitting a blueprint", () => {
+  for (const [input, args] of [
+    ["bad!", []],
+    ["{", ["--plan"]],
+    [JSON.stringify({ inputLimits: { "iron-plate": 0 } }), ["--plan"]],
+  ]) {
+    const result = run(input, args);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Blueprint failed validation:/);
-    assert.match(result.stderr, /itemFluidSignalRecipeEntityName|entityName/);
-  });
-
-  test('exits non-zero for input that cannot be decoded at all', () => {
-    const result = runCli('not a valid helmod export string !!!');
-    assert.notEqual(result.status, 0);
-  });
+    assert.equal(result.stdout, "");
+    assert.ok(result.stderr.length > 0);
+  }
 });

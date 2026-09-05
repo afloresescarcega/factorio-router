@@ -1,41 +1,42 @@
 {
-  "name": "frontend",
+  "name": "factorio-router",
   "version": "0.1.0",
   "private": true,
-  "homepage": ".",
+  "type": "module",
   "dependencies": {
-    "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^13.5.0",
-    "factorio-blueprint": "^2.6.5",
+    "ajv": "^6.15.0",
     "pako": "^2.1.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^13.4.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "jsdom": "^29.1.1",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "start": "vite",
+    "build": "vite build",
+    "test": "npm run test:unit && npm run test:node",
+    "test:unit": "vitest run",
+    "test:node": "node --test cli.test.mjs validator/validate.test.mjs",
+    "test:watch": "vitest",
+    "test:coverage": "npm run test:unit -- --coverage && npm run test:node:coverage",
+    "test:node:coverage": "mkdir -p coverage-node && node --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage-node/lcov.info --test cli.test.mjs validator/validate.test.mjs",
+    "preview": "vite preview"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
   },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+  "description": "Plan Factorio production lines from output targets, input limits, and machine constraints. Preview and export blueprints in the browser.",
+  "homepage": "https://afloresescarcega.github.io/factorio-router/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/afloresescarcega/factorio-router.git",
+    "directory": "frontend"
   }
 }

@@ -1,0 +1,9 @@
+{
+  "outputs": [{ "recipe": "electronic-circuit", "rate": 60 }],
+  "assembler": "assembling-machine-2",
+  "belt": "transport-belt",
+  "intermediates": true,
+  "fromOre": false,
+  "maxMachines": 20,
+  "inputLimits": { "iron-plate": 60, "copper-plate": 90 }
+}
