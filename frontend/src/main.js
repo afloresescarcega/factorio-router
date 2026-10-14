@@ -33,28 +33,26 @@ export function planHelmodString(helmodString, config = {}) {
     if (!Array.isArray(value) && "count" in value) return Number(value.count) > 0;
     return Object.values(value).some(inUse);
   };
+  const isIgnoredSetting = (key, value) => {
+    const normalized = key.toLowerCase();
+    if (["module", "modules", "beacon", "beacons"].includes(normalized))
+      return inUse(value);
+    return (
+      normalized === "quality" &&
+      value !== undefined &&
+      value !== null &&
+      String(value).toLowerCase() !== "normal"
+    );
+  };
+  const childrenOf = (value) =>
+    value && typeof value === "object" ? Object.values(value) : [];
   function inspectNode(node) {
     if (!node || typeof node !== "object") return;
     for (const [key, value] of Object.entries(node)) {
-      const normalized = key.toLowerCase();
-      if (["module", "modules", "beacon", "beacons"].includes(normalized) && inUse(value))
-        ignoredSettings = true;
-      if (
-        normalized === "quality" &&
-        value !== undefined &&
-        value !== null &&
-        String(value).toLowerCase() !== "normal"
-      )
-        ignoredSettings = true;
-      if (value && typeof value === "object")
-        for (const child of Array.isArray(value) ? value : Object.values(value))
-          inspectNode(child);
+      if (isIgnoredSetting(key, value)) ignoredSettings = true;
+      for (const child of childrenOf(value)) inspectNode(child);
     }
-    if (
-      node.type === "recipe" &&
-      node.factory?.name &&
-      MACHINES[node.factory.name]?.spaceAge
-    )
+    if (node.type === "recipe" && MACHINES[node.factory?.name]?.spaceAge)
       usesSpaceAgeFactory = true;
   }
   inspectNode(data);
