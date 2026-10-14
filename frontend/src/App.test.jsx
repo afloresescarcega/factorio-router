@@ -200,6 +200,8 @@ test("rate units convert targets and supply together without changing the bluepr
 
 test("green belts and independent stacking generate real entities and recover safely from overload", () => {
   render(<App />);
+  expect(screen.queryByText("Belt stacking")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Space Age" }));
   expect(screen.getByText("Belt stacking").closest("details")).not.toHaveAttribute("open");
   fireEvent.change(screen.getByLabelText("Output recipe 1"), { target: { value: "copper-cable" } });
   fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "turbo-transport-belt" } });
@@ -227,6 +229,9 @@ test("green belts and independent stacking generate real entities and recover sa
   fireEvent.click(screen.getByRole("button", { name: "Reset example" }));
   expect(screen.getByLabelText("Belts")).toHaveValue("transport-belt");
   expect(screen.getByLabelText("Rate units")).toHaveValue("items/min");
+  expect(screen.queryByLabelText("Input stacks")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Output stacks")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Space Age" }));
   expect(screen.getByLabelText("Input stacks")).toHaveValue("1");
   expect(screen.getByLabelText("Output stacks")).toHaveValue("1");
 });
@@ -257,6 +262,7 @@ test("all catalog targets can be added without duplicate selections or an oversi
 
 test("Helmod import keeps Space Age settings and converts canonical rates to the selected unit", () => {
   render(<App />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Space Age" }));
   fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "turbo-transport-belt" } });
   fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "2" } });
   fireEvent.change(screen.getByLabelText("Output stacks"), { target: { value: "3" } });
@@ -270,4 +276,63 @@ test("Helmod import keeps Space Age settings and converts canonical rates to the
   expect(screen.getByLabelText("Output stacks")).toHaveValue("3");
   const blueprint = decodeBlueprint(showExport().value).blueprint;
   expect(blueprint.entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(2);
+});
+
+test("Space Age controls are hidden by default and reset Space Age choices when disabled", () => {
+  render(<App />);
+  const spaceAge = screen.getByRole("checkbox", { name: "Space Age" });
+  expect(spaceAge).not.toBeChecked();
+  expect(screen.queryByText("Belt stacking")).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Green belt/ })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Electronics machine")).not.toBeInTheDocument();
+
+  fireEvent.click(spaceAge);
+  expect(screen.getByText("Belt stacking")).toBeInTheDocument();
+  expect(screen.getByLabelText("Electronics machine")).toHaveValue("assembling");
+  expect(screen.getByRole("option", { name: /Green belt/ })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "turbo-transport-belt" } });
+  fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Output stacks"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Electronics machine"), { target: { value: "electromagnetic-plant" } });
+  fireEvent.change(screen.getByLabelText("Machine for Copper cable"), { target: { value: "electromagnetic-plant" } });
+  expect(decodeBlueprint(showExport().value).blueprint.entities.some((entity) => entity.name === "electromagnetic-plant")).toBe(true);
+
+  fireEvent.click(spaceAge);
+  expect(spaceAge).not.toBeChecked();
+  expect(screen.getByLabelText("Belts")).toHaveValue("transport-belt");
+  expect(screen.queryByRole("option", { name: /Green belt/ })).not.toBeInTheDocument();
+  expect(screen.queryByText("Belt stacking")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Electronics machine")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Machine for Copper cable")).toHaveValue("assembling-machine-2");
+  expect(decodeBlueprint(showExport().value).blueprint.entities.some((entity) => entity.name === "electromagnetic-plant")).toBe(false);
+});
+
+test("electronics machine selection uses and previews the electromagnetic plant", () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Space Age" }));
+  fireEvent.change(screen.getByLabelText("Electronics machine"), { target: { value: "electromagnetic-plant" } });
+
+  const blueprint = decodeBlueprint(showExport().value).blueprint;
+  expect(blueprint.entities.some((entity) => entity.name === "electromagnetic-plant")).toBe(true);
+  expect(
+    within(screen.getByRole("row", { name: /Electronic circuit/ })).getByText("60"),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Layout", exact: true }));
+  expect(screen.getAllByText("EM").length).toBeGreaterThan(0);
+  expect(document.querySelector(".legend")).toHaveTextContent("Electromagnetic plant");
+});
+
+test("importing a Helmod electromagnetic plant enables Space Age", () => {
+  render(<App />);
+  const encoded = HelmodFactory.encodeHelmod({
+    type: "recipe",
+    name: "electronic-circuit",
+    factory: { name: "electromagnetic-plant", count: 2 },
+  });
+  fireEvent.change(screen.getByLabelText("Helmod export"), { target: { value: encoded } });
+  fireEvent.click(screen.getByRole("button", { name: "Import machine counts" }));
+
+  expect(screen.getByRole("checkbox", { name: "Space Age" })).toBeChecked();
+  expect(screen.getByLabelText("Electronics machine")).toBeInTheDocument();
+  expect(screen.getByLabelText("Machine for Electronic circuit")).toHaveValue("electromagnetic-plant");
 });

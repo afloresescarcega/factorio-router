@@ -1,20 +1,11 @@
-import { RECIPES } from "./recipeCatalog.js";
+import { MACHINES, RECIPES } from "./recipeCatalog.js";
 import { BELTS, DEFAULT_CONFIG, planProduction } from "./planner.js";
-import { createLayout } from "./layout.js";
+import { createLayout, entitySize, machineGeometry } from "./layout.js";
 import { encodeBlueprint, decodeBlueprint } from "./blueprintFactory.js";
 import { validateBlueprintString } from "../validator/validate.mjs";
 
 const vector = { 0: [0, -1], 4: [1, 0], 8: [0, 1], 12: [-1, 0] };
 const key = (x, y) => `${x},${y}`;
-const size = (entity) =>
-  entity.name.startsWith("assembling-machine") ||
-  entity.name === "electric-furnace"
-    ? [3, 3]
-    : entity.name.endsWith("splitter")
-      ? entity.direction === 4 || entity.direction === 12
-        ? [1, 2]
-        : [2, 1]
-      : [1, 1];
 const build = (patch, options) =>
   createLayout(planProduction({ ...DEFAULT_CONFIG, ...patch }), options);
 const undergroundReach = {
@@ -28,7 +19,7 @@ const isTransport = (entity) =>
 
 function measuredFootprint(layout) {
   const edges = layout.blueprint.blueprint.entities.map((entity) => {
-    const [width, height] = size(entity);
+    const [width, height] = entitySize(entity);
     return {
       left: entity.position.x - width / 2,
       right: entity.position.x + width / 2,
@@ -48,7 +39,7 @@ const footprint = (layout) => measuredFootprint(layout).area;
 
 function machineCounts(layout) {
   return layout.blueprint.blueprint.entities
-    .filter((entity) => size(entity)[0] === 3)
+    .filter((entity) => MACHINES[entity.name])
     .reduce((counts, entity) => {
       const id = `${entity.name}:${entity.recipe || "smelting"}`;
       counts[id] = (counts[id] || 0) + 1;
@@ -61,7 +52,7 @@ function inspect(layout) {
   const entities = layout.blueprint.blueprint.entities;
   const tiles = new Map();
   for (const entity of entities) {
-    const [w, h] = size(entity);
+    const [w, h] = entitySize(entity);
     const { x, y } = entity.position;
     expect(Number.isInteger(x - w / 2)).toBe(true);
     expect(Number.isInteger(y - h / 2)).toBe(true);
@@ -157,7 +148,7 @@ function inspect(layout) {
       `missing inserter pickup ${entity.entity_number}`,
     ).toBeDefined();
     expect(drop, `missing inserter drop ${entity.entity_number}`).toBeDefined();
-    const machine = size(pickup)[0] === 3 ? pickup : drop;
+    const machine = MACHINES[pickup.name] ? pickup : drop;
     const recipe = layout.annotations.find(
       (a) => a.kind === "machine" && a.x + 0.5 === machine.position.x,
     )?.item;
@@ -197,9 +188,9 @@ function inspect(layout) {
   }
   const poles = entities.filter((e) => e.name === "medium-electric-pole");
   for (const powered of entities.filter(
-    (e) => e.name.includes("inserter") || size(e)[0] === 3,
+    (e) => e.name.includes("inserter") || MACHINES[e.name],
   )) {
-    const [w, h] = size(powered);
+    const [w, h] = entitySize(powered);
     expect(
       poles.some(
         (pole) =>
@@ -267,6 +258,59 @@ test("every catalog recipe exports without overlap, missing routes or invalid na
   }
 });
 
+test("every electronics recipe exports on the electromagnetic plant", () => {
+  for (const recipe of RECIPES.filter((entry) => entry.category === "electronics")) {
+    const layout = build({
+      spaceAge: true,
+      electronicsMachine: "electromagnetic-plant",
+      assembler: "assembling-machine-2",
+      outputs: [{ recipe: recipe.id, rate: 1 }],
+      fromOre: true,
+    });
+    expect(
+      layout.blueprint.blueprint.entities.some(
+        (entity) => entity.name === "electromagnetic-plant",
+      ),
+      recipe.id,
+    ).toBe(true);
+    inspect(layout);
+    expect(
+      validateBlueprintString(encodeBlueprint(layout.blueprint)),
+      recipe.id,
+    ).toEqual({ ok: true, errors: [] });
+  }
+});
+
+test.each(["standard", "compact"])(
+  "%s mixed EM circuit and assembler gear line has connected transport and power",
+  (layoutMode) => {
+    const layout = build(
+      {
+        spaceAge: true,
+        electronicsMachine: "electromagnetic-plant",
+        assembler: "assembling-machine-1",
+        intermediates: false,
+        externalItems: ["iron-plate", "copper-cable"],
+        outputs: [
+          { recipe: "electronic-circuit", rate: 1 },
+          { recipe: "iron-gear-wheel", rate: 1 },
+        ],
+      },
+      { compact: layoutMode === "compact" },
+    );
+    const machines = layout.blueprint.blueprint.entities.filter(
+      (entity) => MACHINES[entity.name],
+    );
+    expect(machines.some((entity) => entity.name === "electromagnetic-plant")).toBe(true);
+    expect(machines.some((entity) => entity.name === "assembling-machine-1")).toBe(true);
+    inspect(layout);
+    expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({
+      ok: true,
+      errors: [],
+    });
+  },
+);
+
 test("wrapped columns retain all machine counts and connect every lane", () => {
   const layout = build({
     outputs: [{ recipe: "automation-science-pack", rate: 150 }],
@@ -300,6 +344,7 @@ test.each(Object.keys(BELTS))(
   (belt) => {
     for (const recipe of RECIPES) {
       const config = {
+        spaceAge: true,
         outputs: [{ recipe: recipe.id, rate: 1 }],
         belt,
         fromOre: true,
@@ -323,6 +368,7 @@ test.each(Object.keys(BELTS))(
   "compact %s wrapped columns connect all producers and all three ingredients",
   (belt) => {
     const config = {
+      spaceAge: true,
       outputs: [
         { recipe: "splitter", rate: 10 },
         { recipe: "electronic-circuit", rate: 5 },
@@ -437,6 +483,7 @@ test("separate input and output materials safely share the same compact bus row"
 
 test.each(["standard", "compact"])("%s supports all 45 output targets with isolated routes and valid Space Age entities", (layoutMode) => {
   const config = {
+    spaceAge: true,
     layoutMode, belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
     fromOre: true, outputs: RECIPES.map((recipe) => ({ recipe: recipe.id, rate: 0.01 })),
   };
@@ -452,6 +499,7 @@ test.each(["standard", "compact"])("%s stacked belts at the lane limit use stack
   for (const belt of Object.keys(BELTS)) {
     for (const stackSize of [1, 2, 3, 4]) {
       const config = {
+        spaceAge: true,
         belt, layoutMode, inputStackSize: stackSize, outputStackSize: stackSize,
         outputs: [{ recipe: "copper-cable", rate: BELTS[belt].laneRate * stackSize }],
       };
@@ -459,7 +507,18 @@ test.each(["standard", "compact"])("%s stacked belts at the lane limit use stack
       inspect(layout);
       const entities = layout.blueprint.blueprint.entities;
       const machines = entities.filter((entity) => entity.recipe === "copper-cable");
-      const outputInserters = machines.map((machine) => entities.find((entity) => entity.position.x === machine.position.x + 2 && entity.position.y === machine.position.y));
+      const outputInserters = machines.map((machine) => {
+        const geometry = machineGeometry(machine.name);
+        return entities.find(
+          (entity) =>
+            entity.position.x ===
+              machine.position.x +
+              geometry.outputInserter +
+              0.5 -
+              geometry.centerOffset &&
+            entity.position.y === machine.position.y,
+        );
+      });
       for (const inserter of outputInserters) {
         expect(inserter.name).toBe(stackSize > 1 ? "stack-inserter" : "fast-inserter");
         expect(inserter.override_stack_size).toBe(stackSize > 1 ? stackSize : undefined);
@@ -475,12 +534,13 @@ test("green stacked intermediates, furnaces, and three-ingredient machines keep 
   for (const outputStackSize of [2, 3, 4]) {
     for (const recipe of RECIPES) {
       const layout = build({
+        spaceAge: true,
         belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize, fromOre: true,
         layoutMode: "compact", outputs: [{ recipe: recipe.id, rate: 1 }],
       });
       inspect(layout);
       const entities = layout.blueprint.blueprint.entities;
-      expect(entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(entities.filter((entity) => size(entity)[0] === 3).length);
+      expect(entities.filter((entity) => entity.name === "stack-inserter")).toHaveLength(entities.filter((entity) => MACHINES[entity.name]).length);
       expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({ ok: true, errors: [] });
     }
   }
@@ -516,6 +576,7 @@ test.each(Object.keys(BELTS))(
     for (const [caseIndex, scenario] of cases.entries()) {
       const config = {
         ...DEFAULT_CONFIG,
+        spaceAge: true,
         ...scenario,
         belt,
         outputs: scenario.outputs.map((recipe) => ({ recipe, rate: 1 })),

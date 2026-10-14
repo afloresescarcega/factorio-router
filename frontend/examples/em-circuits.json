@@ -1,0 +1,10 @@
+{
+  "spaceAge": true,
+  "electronicsMachine": "electromagnetic-plant",
+  "outputs": [{ "recipe": "electronic-circuit", "rate": 60 }],
+  "rateUnit": "items/min",
+  "belt": "transport-belt",
+  "inputStackSize": 1,
+  "outputStackSize": 1,
+  "layoutMode": "standard"
+}

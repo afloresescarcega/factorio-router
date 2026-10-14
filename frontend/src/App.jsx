@@ -4,7 +4,10 @@ import {
   BELTS,
   DEFAULT_CONFIG,
   MAX_OUTPUTS,
+  canCraft,
   planProduction,
+  productivityFor,
+  recipeById,
   title,
   formatRate,
 } from "./planner.js";
@@ -76,6 +79,46 @@ export default function App() {
         [recipe]: { ...config.machineOverrides[recipe], ...patch },
       },
     });
+  const setSpaceAge = (enabled) => {
+    if (enabled) {
+      update({ spaceAge: true });
+      return;
+    }
+    const nextBelt = DEFAULT_CONFIG.belt;
+    const nextInputStackSize = DEFAULT_CONFIG.inputStackSize;
+    const nextOutputStackSize = DEFAULT_CONFIG.outputStackSize;
+    const convertRate = (value, oldScale, newScale) => {
+      const rate = numericRate(value);
+      return Number.isFinite(rate) ? (rate * oldScale) / newScale : value;
+    };
+    const oldInputScale = rateScale(config.rateUnit, config.belt, config.inputStackSize);
+    const oldOutputScale = rateScale(config.rateUnit, config.belt, config.outputStackSize);
+    const nextInputScale = rateScale(config.rateUnit, nextBelt, nextInputStackSize);
+    const nextOutputScale = rateScale(config.rateUnit, nextBelt, nextOutputStackSize);
+    const machineOverrides = Object.fromEntries(
+      Object.entries(config.machineOverrides).filter(
+        ([, override]) => !MACHINES[override?.factory]?.spaceAge,
+      ),
+    );
+    update({
+      spaceAge: false,
+      belt: nextBelt,
+      inputStackSize: nextInputStackSize,
+      outputStackSize: nextOutputStackSize,
+      electronicsMachine: DEFAULT_CONFIG.electronicsMachine ?? "assembling",
+      outputs: config.outputs.map((output) => ({
+        ...output,
+        rate: convertRate(output.rate, oldOutputScale, nextOutputScale),
+      })),
+      inputLimits: Object.fromEntries(
+        Object.entries(config.inputLimits).map(([name, value]) => [
+          name,
+          convertRate(value, oldInputScale, nextInputScale),
+        ]),
+      ),
+      machineOverrides,
+    });
+  };
   async function copy() {
     try {
       await navigator.clipboard.writeText(string);
@@ -110,7 +153,16 @@ export default function App() {
         layoutMode: config.layoutMode,
         inputStackSize: config.inputStackSize,
         outputStackSize: config.outputStackSize,
+        spaceAge: config.spaceAge,
       });
+      const usesSpaceAge = Boolean(
+        imported.spaceAge ||
+          config.spaceAge ||
+          config.belt === "turbo-transport-belt" ||
+          config.inputStackSize > 1 ||
+          config.outputStackSize > 1 ||
+          imported.units.some((unit) => MACHINES[unit.factory]?.spaceAge),
+      );
       update({
         ...DEFAULT_CONFIG,
         outputs: imported.outputs.map(({ name, rate }) => ({
@@ -123,6 +175,7 @@ export default function App() {
         rateUnit: config.rateUnit,
         inputStackSize: config.inputStackSize,
         outputStackSize: config.outputStackSize,
+        spaceAge: usesSpaceAge,
         fromOre: true,
         externalItems: imported.inputs.map((input) => input.name),
         machineOverrides: Object.fromEntries(
@@ -132,8 +185,11 @@ export default function App() {
           ]),
         ),
       });
+      const ignoredEffects = imported.warnings.some((warning) =>
+        warning.startsWith("Helmod modules, beacons"),
+      );
       setStatus(
-        "Helmod line imported. Its targets, inputs, and machine counts are now editable below. Modules and productivity settings are not imported.",
+        `Helmod line imported. Its targets, inputs, and machine counts are now editable below. Built-in plant productivity is included where recipes allow it.${ignoredEffects ? " Helmod modules, beacons, and non-normal quality were ignored." : ""}`,
       );
     } catch (error) {
       setImportError(error.message);
@@ -275,6 +331,15 @@ export default function App() {
               <h2>
                 <span className="step">02</span> Machines & transport
               </h2>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  aria-label="Space Age"
+                  checked={Boolean(config.spaceAge)}
+                  onChange={(e) => setSpaceAge(e.target.checked)}
+                />
+                Space Age
+              </label>
               <label className="field">
                 Default assembler
                 <select
@@ -284,7 +349,12 @@ export default function App() {
                   }
                 >
                   {Object.entries(MACHINES)
-                    .filter(([, machine]) => machine.category === "crafting")
+                    .filter(
+                      ([id, machine]) =>
+                        (!machine.spaceAge || config.spaceAge) &&
+                        machine.categories?.includes("crafting") &&
+                        RECIPES.some((recipe) => canCraft(id, recipe)),
+                    )
                     .map(([id, machine]) => (
                       <option value={id} key={id}>
                         {machine.name}
@@ -292,14 +362,32 @@ export default function App() {
                     ))}
                 </select>
               </label>
+              {config.spaceAge && (
+                <label className="field">
+                  Electronics machine
+                  <select
+                    aria-label="Electronics machine"
+                    value={config.electronicsMachine ?? "assembling"}
+                    onChange={(e) => update({ electronicsMachine: e.target.value })}
+                  >
+                    <option value="assembling">Assembler</option>
+                    <option value="electromagnetic-plant">Electromagnetic plant</option>
+                  </select>
+                </label>
+              )}
               <div className="field-pair">
                 <label className="field">
                   Belts
                   <select
                     value={config.belt}
-                    onChange={(e) => update({ belt: e.target.value })}
+                    onChange={(e) => {
+                      if (Object.hasOwn(BELTS, e.target.value))
+                        update({ belt: e.target.value });
+                    }}
                   >
-                    {Object.entries(BELTS).map(([id, belt]) => (
+                    {Object.entries(BELTS)
+                      .filter(([id]) => config.spaceAge || id !== "turbo-transport-belt")
+                      .map(([id, belt]) => (
                       <option key={id} value={id}>
                         {belt.name}
                       </option>
@@ -318,7 +406,7 @@ export default function App() {
                   />
                 </label>
               </div>
-              <details className="stacking-options">
+              {config.spaceAge && <details className="stacking-options">
                 <summary>Belt stacking <span>{config.inputStackSize > 1 || config.outputStackSize > 1 ? `${config.inputStackSize}× in · ${config.outputStackSize}× out` : "Optional · Space Age"}</span></summary>
                 <div className="field-pair">
                   {[["inputStackSize", "Input stacks"], ["outputStackSize", "Output stacks"]].map(([key, label]) => (
@@ -333,7 +421,7 @@ export default function App() {
                 </div>
                 <p className="help">Inputs must arrive already stacked. Output stacking adds stack inserters to every machine, including intermediates. Input inserter speeds stay conservative.</p>
                 <p className="help">2 high requires Stack inserter research; 3 / 4 high require Transport belt capacity 1 / 2. Stack outputs wait for a full batch.</p>
-              </details>
+              </details>}
               {config.belt === "turbo-transport-belt" && <p className="help">Green belts require Space Age and Turbo transport belt research.</p>}
               <label className="check-row">
                 <input
@@ -627,9 +715,9 @@ export default function App() {
                             >
                               {Object.entries(MACHINES)
                                 .filter(
-                                  ([, machine]) =>
-                                    machine.category ===
-                                    MACHINES[unit.factory].category,
+                                  ([id, machine]) =>
+                                    canCraft(id, recipeById[unit.recipe]) &&
+                                    (config.spaceAge || !machine.spaceAge),
                                 )
                                 .map(([id, machine]) => (
                                   <option key={id} value={id}>
@@ -659,7 +747,16 @@ export default function App() {
                             />
                           </td>
                           <td>
-                            {formatRate(unit.crafts * unit.results[0].amount / outputScale)}
+                            {formatRate(
+                              (unit.crafts *
+                                unit.results[0].amount *
+                                (1 +
+                                  productivityFor(
+                                    recipeById[unit.recipe],
+                                    unit.factory,
+                                  ))) /
+                                outputScale,
+                            )}
                           </td>
                           <td>
                             {!config.outputs.some(
@@ -695,8 +792,8 @@ export default function App() {
             <p className="scope-note">
               {plan?.warnings.join(" ") ||
                 "Supports a curated catalog of vanilla solid-item recipes."}{" "}
-              Fluids, modules, quality, mining, and Space Age production recipes are
-              outside this version.
+              Fluids, research bonuses, modules, beacons, quality, mining, and
+              other Space Age machines and recipes are outside this version.
             </p>
           </div>
         </div>

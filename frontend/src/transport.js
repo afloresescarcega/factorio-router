@@ -32,16 +32,23 @@ export function numericRate(value) {
 export function transportSettings(config = {}) {
   const belt = config.belt ?? "transport-belt";
   if (!Object.hasOwn(BELTS, belt)) throw new Error("Choose a supported belt tier.");
+  const spaceAge = config.spaceAge === true;
   const rateUnit = config.rateUnit ?? "items/min";
   if (!RATE_UNITS.includes(rateUnit))
     throw new Error("Choose items/min, items/s, or belts for rate units.");
-  const settings = { belt, rateUnit };
+  const settings = { belt, rateUnit, spaceAge };
   for (const [key, label] of [["inputStackSize", "Input"], ["outputStackSize", "Output"]]) {
     const value = config[key] === undefined ? 1 : numericRate(config[key]);
     if (!Number.isInteger(value) || value < 1 || value > 4)
       throw new Error(`${label} belt stack size must be a whole number between 1 and 4.`);
     settings[key] = value;
   }
+  if (!spaceAge && belt === "turbo-transport-belt")
+    throw new Error("Enable Space Age to use Green belts.");
+  if (!spaceAge && settings.inputStackSize > 1)
+    throw new Error("Enable Space Age to use input belt stacking.");
+  if (!spaceAge && settings.outputStackSize > 1)
+    throw new Error("Enable Space Age to use output belt stacking.");
   return settings;
 }
 

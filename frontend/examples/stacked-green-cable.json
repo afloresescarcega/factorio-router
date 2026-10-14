@@ -1,4 +1,5 @@
 {
+  "spaceAge": true,
   "outputs": [{ "recipe": "copper-cable", "rate": 0.5 }],
   "rateUnit": "belts",
   "belt": "turbo-transport-belt",

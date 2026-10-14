@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { entitySize } from "./layout.js";
+import { MACHINES } from "./recipeCatalog.js";
 import { title } from "./planner.js";
 
 const COLORS = {
@@ -13,12 +14,13 @@ const GRID = "#372f27";
 function Entity({ entity }) {
   const [w, h] = entitySize(entity);
   const { x, y } = entity.position;
-  const machine = w === 3;
+  const machine = Object.hasOwn(MACHINES, entity.name);
+  const electromagneticPlant = entity.name === "electromagnetic-plant";
   const pole = entity.name === "medium-electric-pole";
   const inserter = entity.name.includes("inserter");
   const underground = entity.name.includes("underground");
   const color = machine
-    ? COLORS.machine
+    ? electromagneticPlant ? "#d8a143" : COLORS.machine
     : pole
       ? COLORS.pole
       : inserter
@@ -61,7 +63,9 @@ function Entity({ entity }) {
             fontSize=".44"
             fill="#ffe6c0"
           >
-            {entity.name === "electric-furnace"
+            {electromagneticPlant
+              ? "EM"
+              : entity.name === "electric-furnace"
               ? "EF"
               : `A${entity.name.at(-1)}`}
           </text>
@@ -104,6 +108,7 @@ export default function BlueprintPreview({ layout }) {
   const [zoom, setZoom] = useState(1);
   const { bounds, blueprint, annotations, footprint } = layout;
   const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
+  const hasElectromagneticPlant = blueprint.blueprint.entities.some((entity) => entity.name === "electromagnetic-plant");
   const beltColor = blueprint.blueprint.entities.some((entity) => entity.name === "turbo-transport-belt") ? "#6ebd77" : COLORS.belt;
   const width = bounds.right - bounds.left + 1,
     height = bounds.bottom - bounds.top + 1;
@@ -227,6 +232,7 @@ export default function BlueprintPreview({ layout }) {
           <i style={{ background: COLORS.machine }} />
           Machines
         </span>
+        {hasElectromagneticPlant && <span><i style={{ background: "#d8a143" }} />Electromagnetic plant</span>}
         <span>
           <i style={{ background: beltColor }} />
           Belts & crossings
