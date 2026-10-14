@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { memo, useState } from "react";
 import { entitySize } from "./layout.js";
 import { MACHINES } from "./recipeCatalog.js";
 import { title } from "./planner.js";
@@ -22,7 +22,7 @@ function machineLabel(name) {
   if (name === "electric-furnace") return "EF";
   return `A${name.at(-1)}`;
 }
-function Entity({ entity }) {
+const Entity = memo(function Entity({ entity }) {
   const [w, h] = entitySize(entity);
   const { x, y } = entity.position;
   const machine = Object.hasOwn(MACHINES, entity.name);
@@ -102,9 +102,9 @@ function Entity({ entity }) {
       )}
     </g>
   );
-}
+});
 
-export default function BlueprintPreview({ layout }) {
+function BlueprintPreview({ layout }) {
   const [zoom, setZoom] = useState(1);
   const { bounds, blueprint, annotations, footprint } = layout;
   const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
@@ -255,3 +255,5 @@ export default function BlueprintPreview({ layout }) {
     </>
   );
 }
+
+export default memo(BlueprintPreview);

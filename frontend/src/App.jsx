@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useDeferredValue, useMemo, useState } from "react";
 import { RECIPES, MACHINES } from "./recipeCatalog.js";
 import {
   BELTS,
@@ -48,9 +48,12 @@ export default function App() {
     setConfig((current) => ({ ...current, ...patch }));
     setStatus("");
   };
+  // Planning and the SVG preview are heavy for large lines; let inputs update
+  // first and recompute in a low-priority render that typing can interrupt.
+  const plannedConfig = useDeferredValue(config);
   const result = useMemo(() => {
     try {
-      const plan = planProduction(config);
+      const plan = planProduction(plannedConfig);
       const layout = plan.issues.length ? null : createLayout(plan);
       return {
         plan,
@@ -60,7 +63,7 @@ export default function App() {
     } catch (error) {
       return { error: error.message };
     }
-  }, [config]);
+  }, [plannedConfig]);
   const { plan, layout, string } = result;
   const inputScale = rateScale(config.rateUnit, config.belt, config.inputStackSize);
   const outputScale = rateScale(config.rateUnit, config.belt, config.outputStackSize);
