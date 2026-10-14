@@ -16,10 +16,11 @@ const schema = JSON.parse(readFileSync(join(here, 'blueprintSchema.json'), 'utf-
 const names = JSON.parse(readFileSync(join(here, 'factorioNames.json'), 'utf-8'));
 
 const sets = Object.fromEntries(Object.entries(names).map(([k, v]) => [k, new Set(v)]));
-// The editor's snapshot is base-game-only. Add only the Space Age transport
-// entities this planner emits, verified against Wube factorio-data 2.0.72:
-// space-age/prototypes/entity/{transport-belts,entities}.lua.
-for (const name of ['turbo-transport-belt', 'turbo-underground-belt', 'turbo-splitter', 'stack-inserter']) {
+// The editor's snapshot is base-game-only. Add only the Space Age entities
+// this planner emits, verified against Wube factorio-data 2.0.72:
+// space-age/prototypes/entity/transport-belts.lua and entities.lua:1692
+// (https://github.com/wube/factorio-data/blob/2.0.72/space-age/prototypes/entity/entities.lua#L1692).
+for (const name of ['turbo-transport-belt', 'turbo-underground-belt', 'turbo-splitter', 'stack-inserter', 'electromagnetic-plant']) {
     sets.entities.add(name);
     sets.items.add(name);
 }

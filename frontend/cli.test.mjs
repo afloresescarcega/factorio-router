@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HelmodFactory } from "./src/helmodFactory.js";
 import { decodeBlueprint } from "./src/blueprintFactory.js";
@@ -22,7 +23,7 @@ const helmod = HelmodFactory.encodeHelmod({
 test("native CLI normalizes second and belt units and validates Space Age entities", () => {
   for (const [rateUnit, rate] of [["items/min", 7200], ["items/s", 120], ["belts", 0.5]]) {
     const result = run(JSON.stringify({
-      belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
+      spaceAge: true, belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
       rateUnit, outputs: [{ recipe: "copper-cable", rate }], layoutMode: "compact",
     }), ["--plan"]);
     assert.equal(result.status, 0, result.stderr);
@@ -35,6 +36,21 @@ test("native CLI normalizes second and belt units and validates Space Age entiti
   }
 });
 
+test("native CLI requires the Space Age switch for turbo belts and stacking", () => {
+  for (const patch of [
+    { belt: "turbo-transport-belt" },
+    { inputStackSize: 2 },
+    { outputStackSize: 2 },
+  ]) {
+    const result = run(JSON.stringify({
+      outputs: [{ recipe: "copper-cable", rate: 60 }], ...patch,
+    }), ["--plan"]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Enable Space Age to use/);
+  }
+});
+
 test("native CLI never emits blueprints for invalid Space Age constraints", () => {
   for (const patch of [
     { outputStackSize: 5 }, { inputStackSize: 1.5 }, { rateUnit: "belt/s" },
@@ -42,12 +58,24 @@ test("native CLI never emits blueprints for invalid Space Age constraints", () =
     { inputStackSize: 1 }, { inputLimits: { "copper-plate": 0.249 } },
   ]) {
     const result = run(JSON.stringify({
-      belt: "turbo-transport-belt", rateUnit: "belts", inputStackSize: 4, outputStackSize: 4,
+      spaceAge: true, belt: "turbo-transport-belt", rateUnit: "belts", inputStackSize: 4, outputStackSize: 4,
       outputs: [{ recipe: "copper-cable", rate: 0.5 }], ...patch,
     }), ["--plan"]);
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
     assert.ok(result.stderr.length > 0);
+  }
+});
+
+test("CLI example plans electronic circuits on the electromagnetic plant in both layouts", () => {
+  const example = readFileSync(new URL("./examples/em-circuits.json", import.meta.url), "utf8");
+  for (const args of [["--plan"], ["--plan", "--compact"]]) {
+    const result = run(example, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /passed schema/);
+    const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
+    assert.ok(blueprint.entities.some((entity) => entity.name === "electromagnetic-plant"));
+    assert.ok(blueprint.entities.some((entity) => entity.recipe === "electronic-circuit"));
   }
 });
 

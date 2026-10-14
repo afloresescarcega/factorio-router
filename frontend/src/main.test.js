@@ -87,3 +87,48 @@ test("combines repeated recipe counts and rejects empty exports", () => {
     planHelmodString(HelmodFactory.encodeHelmod({ name: "empty" })),
   ).toThrow(/No recipes with factories/);
 });
+
+test("EM plant Helmod imports infer Space Age and balance productivity outputs", () => {
+  const encoded = encode([
+    ["electronic-circuit", "electromagnetic-plant", 2],
+  ]);
+  const plan = planHelmodString(encoded);
+
+  expect(plan.spaceAge).toBe(true);
+  expect(plan.units[0].factory).toBe("electromagnetic-plant");
+  expect(plan.outputs).toEqual([{ name: "electronic-circuit", rate: 45 }]);
+  expect(plan.inputs).toEqual([
+    { name: "iron-plate", rate: 30 },
+    { name: "copper-cable", rate: 90 },
+  ]);
+});
+
+test("Helmod modules, beacons, and non-normal quality are reported as ignored", () => {
+  const encoded = HelmodFactory.encodeHelmod({
+    type: "recipe",
+    name: "electronic-circuit",
+    quality: "uncommon",
+    factory: {
+      name: "electromagnetic-plant",
+      count: 2,
+      quality: "rare",
+      modules: { 1: { name: "productivity-module-3", quality: "normal" } },
+    },
+    beacons: { 1: { name: "beacon", count: 1, modules: { 1: { name: "speed-module-3" } } } },
+  });
+  const plan = planHelmodString(encoded);
+  expect(plan.spaceAge).toBe(true);
+  expect(plan.warnings.join(" ")).toMatch(/modules, beacons, and non-normal quality settings were ignored/);
+});
+
+test("Helmod placeholder beacons and empty module maps are not reported as ignored", () => {
+  const encoded = HelmodFactory.encodeHelmod({
+    type: "recipe",
+    name: "iron-gear-wheel",
+    factory: { name: "assembling-machine-1", count: 1, modules: {} },
+    beacon: { name: "beacon", count: 0, combo: 4, modules: {} },
+    summary: { beacons: { beacon: { name: "beacon", count: 0 } }, modules: {} },
+  });
+  const plan = planHelmodString(encoded);
+  expect(plan.warnings.join(" ")).not.toMatch(/were ignored/);
+});

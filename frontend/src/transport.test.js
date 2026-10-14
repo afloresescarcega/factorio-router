@@ -22,8 +22,16 @@ test("floating-point tolerances do not accept zero supply or a deliberate tiny o
   expect(plan({ outputs: outputs("copper-cable", 450 + 1e-7) }).issues.join()).toMatch(/one lane/);
 });
 
+test("Space Age defaults off and gates turbo belts and belt stacking with actionable errors", () => {
+  expect(transportSettings({}).spaceAge).toBe(false);
+  expect(transportSettings({ spaceAge: true }).spaceAge).toBe(true);
+  expect(() => transportSettings({ belt: "turbo-transport-belt" })).toThrow(/Enable Space Age to use Green belts/);
+  expect(() => transportSettings({ inputStackSize: 2 })).toThrow(/Enable Space Age to use input belt stacking/);
+  expect(() => transportSettings({ outputStackSize: 2 })).toThrow(/Enable Space Age to use output belt stacking/);
+});
+
 test("stack changes recalculate automatic counts and still reject insufficient manual counts", () => {
-  const config = { belt: "turbo-transport-belt", outputs: outputs("copper-cable", 720) };
+  const config = { spaceAge: true, belt: "turbo-transport-belt", outputs: outputs("copper-cable", 720) };
   expect(plan(config).units[0].count).toBe(8);
   expect(plan({ ...config, outputStackSize: 4 }).units[0].count).toBe(4);
   expect(plan({ ...config, outputStackSize: 4, machineOverrides: { "copper-cable": { count: 3 } } }).issues.join()).toMatch(/needs at least 4/);
@@ -37,7 +45,7 @@ test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both indep
         // Cable produces two items from one plate. Either side can bottleneck.
         const maximum = Math.min(BELTS[belt].laneRate * inputStackSize * 2, BELTS[belt].laneRate * outputStackSize);
         const scale = rateScale(rateUnit, belt, outputStackSize);
-        const config = { belt, inputStackSize, outputStackSize, rateUnit, outputs: outputs("copper-cable", maximum / scale) };
+        const config = { spaceAge: true, belt, inputStackSize, outputStackSize, rateUnit, outputs: outputs("copper-cable", maximum / scale) };
         const valid = plan(config);
         expect(valid.issues, JSON.stringify(config)).toEqual([]);
         expect(valid.outputs[0].rate).toBeCloseTo(maximum, 7);
@@ -51,7 +59,7 @@ test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both indep
 });
 
 test("stacked inputs do not grant stacked capacity to intermediate producers", () => {
-  const config = { inputStackSize: 4, outputs: outputs("electronic-circuit", 200) };
+  const config = { spaceAge: true, inputStackSize: 4, outputs: outputs("electronic-circuit", 200) };
   const invalid = plan(config);
   expect(invalid.issues.join()).toMatch(/Copper cable needs 600\/min/);
   expect(plan({ ...config, outputStackSize: 2 }).issues).toEqual([]);
@@ -61,7 +69,7 @@ test("stacked inputs do not grant stacked capacity to intermediate producers", (
 });
 
 test("stacked outputs do not increase external supply capacity or input inserter speed", () => {
-  expect(plan({ outputStackSize: 4, outputs: outputs("iron-gear-wheel", 300) }).issues.join()).toMatch(/Iron plate needs 600\/min/);
+  expect(plan({ spaceAge: true, outputStackSize: 4, outputs: outputs("iron-gear-wheel", 300) }).issues.join()).toMatch(/Iron plate needs 600\/min/);
   for (const recipe of RECIPES) {
     const factory = recipe.category === "smelting" ? "electric-furnace" : "assembling-machine-3";
     const crafts = craftingCapacity(recipe, factory, 4);
@@ -71,7 +79,7 @@ test("stacked outputs do not increase external supply capacity or input inserter
 });
 
 test("requested surplus and intermediate consumption share the same capacity budget", () => {
-  const config = { outputStackSize: 2, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 300)] };
+  const config = { spaceAge: true, outputStackSize: 2, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 300)] };
   expect(plan(config).issues).toEqual([]);
   expect(plan({ ...config, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 301)] }).issues.join()).toMatch(/Copper cable needs 901/);
   // Duplicate rows are merged before checking throughput.
@@ -80,6 +88,7 @@ test("requested surplus and intermediate consumption share the same capacity bud
 
 test.each(RATE_UNITS)("%s supply limits use the input stack height, not the output height", (rateUnit) => {
   const config = {
+    spaceAge: true,
     rateUnit, belt: "turbo-transport-belt", inputStackSize: 2, outputStackSize: 4,
     outputs: outputs("copper-cable", 720 / rateScale(rateUnit, "turbo-transport-belt", 4)),
     inputLimits: { "copper-plate": 360 / rateScale(rateUnit, "turbo-transport-belt", 2) },
@@ -90,7 +99,7 @@ test.each(RATE_UNITS)("%s supply limits use the input stack height, not the outp
 
 test("unit switching preserves rates, zero/blank supply limits, and machine counts", () => {
   let config = {
-    ...DEFAULT_CONFIG, belt: "turbo-transport-belt", inputStackSize: 3, outputStackSize: 4,
+    ...DEFAULT_CONFIG, spaceAge: true, belt: "turbo-transport-belt", inputStackSize: 3, outputStackSize: 4,
     outputs: outputs("copper-cable", 720), inputLimits: { "copper-plate": 360, coal: "", stone: 0 },
   };
   const before = plan(config);
@@ -105,8 +114,8 @@ test("unit switching preserves rates, zero/blank supply limits, and machine coun
 test("belt multiples follow belt/stack choices, while item rates remain fixed", () => {
   const config = { rateUnit: "belts", outputs: outputs("copper-cable", 0.25) };
   expect(plan(config).outputs[0].rate).toBe(225);
-  expect(plan({ ...config, belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(3600);
-  expect(plan({ ...config, rateUnit: "items/s", belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(15);
+  expect(plan({ ...config, spaceAge: true, belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(3600);
+  expect(plan({ ...config, spaceAge: true, rateUnit: "items/s", belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(15);
   expect(plan({ ...config, outputs: outputs("copper-cable", 2) }).issues.join()).toMatch(/parallel belts are not generated/);
 });
 
@@ -132,7 +141,7 @@ test.each(RATE_UNITS)("%s rejects invalid output edits, overflow and invalid sup
 });
 
 test("all catalog outputs conserve materials and retain machine and target-count limits", () => {
-  const config = { belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4, fromOre: true, outputs: RECIPES.map((recipe) => ({ recipe: recipe.id, rate: 0.01 })) };
+  const config = { spaceAge: true, belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4, fromOre: true, outputs: RECIPES.map((recipe) => ({ recipe: recipe.id, rate: 0.01 })) };
   const result = plan(config);
   expect(result.outputs).toHaveLength(MAX_OUTPUTS);
   expect(result.units).toHaveLength(RECIPES.length);

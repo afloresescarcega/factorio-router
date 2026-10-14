@@ -1,4 +1,5 @@
 import { BELTS, title, formatRate } from "./planner.js";
+import { MACHINES } from "./recipeCatalog.js";
 
 // Factorio 2.0 cardinal directions. All coordinates below are tile indices;
 // odd-size entity centers sit on half tiles in the exported blueprint.
@@ -10,22 +11,34 @@ export const NORTH = 0,
   SOUTH = 8,
   WEST = 12;
 export const COLUMN_SPACING = 20,
-  ROW_SPACING = 4,
   MAX_PER_COLUMN = 12;
-const CHANNELS = [-5, -8, 7],
-  LANES = [-3, -4, 4];
 
 export function entitySize(entity) {
-  if (
-    entity.name.startsWith("assembling-machine") ||
-    entity.name === "electric-furnace"
-  )
-    return [3, 3];
+  if (MACHINES[entity.name]) {
+    const size = MACHINES[entity.name].size ?? 3;
+    return [size, size];
+  }
   if (entity.name.endsWith("splitter"))
     return entity.direction === EAST || entity.direction === WEST
       ? [1, 2]
       : [2, 1];
   return [1, 1];
+}
+
+export function machineGeometry(factory, compact = false) {
+  const size = MACHINES[factory]?.size ?? 3;
+  const right = size - 2;
+  return {
+    size,
+    centerOffset: size % 2 === 0 ? 1 : 0.5,
+    lanes: [-3, -4, right + 3],
+    channels: compact ? [-3, -4, right + 3] : [-5, -8, right + 6],
+    outputInserter: right + 1,
+    outputBelt: right + 2,
+    poleGap: size - 1,
+    poleRight: size - 1,
+    rowSpacing: size + (compact ? 0 : 1),
+  };
 }
 
 // Keep recipe dependency order while packing the lanes and their splitter taps.
@@ -36,10 +49,20 @@ function arrange(plan, compact, columnLimit) {
   for (const unit of plan.units)
     for (let remaining = unit.count; remaining > 0; remaining -= columnLimit) {
       const previous = columns.at(-1);
-      const leftLane = unit.ingredients.length > 1 ? -4 : -3;
-      const previousRight = previous?.unit.ingredients.length === 3 ? 4 : 3;
+      const geometry = machineGeometry(unit.factory, compact);
+      const usedLanes = geometry.lanes.slice(0, unit.ingredients.length);
+      const leftLane = Math.min(...usedLanes);
+      const previousRight = previous
+        ? Math.max(
+            previous.geometry.outputBelt,
+            ...(previous.unit.ingredients.length === 3
+              ? [previous.geometry.lanes[2]]
+              : []),
+          )
+        : 0;
       columns.push({
         unit,
+        geometry,
         count: Math.min(columnLimit, remaining),
         x: previous
           ? previous.x +
@@ -47,7 +70,6 @@ function arrange(plan, compact, columnLimit) {
           : 0,
       });
     }
-  const channels = compact ? LANES : CHANNELS;
   const items = [
     ...new Set(
       plan.units.flatMap((unit) =>
@@ -64,16 +86,21 @@ function arrange(plan, compact, columnLimit) {
   const busFor = new Map(buses.map((bus) => [bus.item, bus]));
   for (const column of columns) {
     column.unit.ingredients.forEach((item, i) =>
-      busFor.get(item.name).taps.push(column.x + channels[i]),
+      busFor.get(item.name).taps.push(column.x + column.geometry.channels[i]),
     );
-    busFor.get(column.unit.results[0].name).feeders.push(column.x + 3);
+    busFor.get(column.unit.results[0].name).feeders.push(
+      column.x + column.geometry.outputBelt,
+    );
   }
   const last = columns.at(-1);
   const leftEdge = compact
     ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
     : -12;
-  const rightEdge =
-    last.x + (compact ? (last.unit.ingredients.length === 3 ? 6 : 5) : 11);
+  const rightOfLast = Math.max(
+    last.geometry.outputBelt,
+    ...(last.unit.ingredients.length === 3 ? [last.geometry.lanes[2]] : []),
+  );
+  const rightEdge = last.x + (compact ? rightOfLast + 2 : rightOfLast + 8);
   for (const bus of buses) {
     bus.external = plan.inputs.some((input) => input.name === bus.item);
     bus.exported = plan.outputs.some((output) => output.name === bus.item);
@@ -93,13 +120,15 @@ function arrange(plan, compact, columnLimit) {
       bus.row = -5 - band * 4;
     }
   }
-  const rowSpacing = compact ? 3 : ROW_SPACING;
   const bottom = Math.max(
-    ...columns.map(({ count }) =>
-      compact
-        ? Math.max((count - 1) * 3 + 1, Math.floor((count - 1) / 2) * 6 + 2)
-        : (count - 1) * ROW_SPACING + 2,
-    ),
+    ...columns.map(({ count, geometry }) => {
+      const lastRow = (count - 1) * geometry.rowSpacing;
+      const machineBottom = lastRow + geometry.size - 1;
+      const poleBottom = compact
+        ? Math.floor((count - 1) / 2) * 2 * geometry.rowSpacing + geometry.size
+        : lastRow + geometry.size;
+      return Math.max(machineBottom, poleBottom);
+    }),
   );
   const top = Math.min(...buses.map((bus) => bus.row));
   return {
@@ -107,7 +136,6 @@ function arrange(plan, compact, columnLimit) {
     buses,
     leftEdge,
     rightEdge,
-    rowSpacing,
     area: (rightEdge - leftEdge + 1) * (bottom - top + 1),
   };
 }
@@ -129,7 +157,7 @@ export function createLayout(
   { compact = plan.layoutMode === "compact" } = {},
 ) {
   if (plan.issues.length) throw new Error(plan.issues.join(" "));
-  const { columns, buses, leftEdge, rightEdge, rowSpacing } = compact
+  const { columns, buses, leftEdge, rightEdge } = compact
     ? compactArrangement(plan)
     : arrange(plan, false, MAX_PER_COLUMN);
   const tier = BELTS[plan.belt];
@@ -144,6 +172,11 @@ export function createLayout(
       position: { x: x + 0.5, y: y + 0.5 },
       ...extra,
     };
+    if (MACHINES[name]) {
+      const size = MACHINES[name].size ?? 3;
+      entity.position.x = x + (size % 2 === 0 ? 1 : 0.5);
+      entity.position.y = y + (size % 2 === 0 ? 1 : 0.5);
+    }
     const [width, height] = entitySize(entity);
     const left = entity.position.x - width / 2,
       top = entity.position.y - height / 2;
@@ -218,10 +251,12 @@ export function createLayout(
     for (const x of bus.feeders) vertical(x, bus.row + 1, -3, NORTH, bus.row);
   }
   for (const { x, unit, count } of columns) {
+    const geometry = machineGeometry(unit.factory, compact);
+    const rowSpacing = geometry.rowSpacing;
     // Compact lanes connect directly to the bus; standard lanes fan out.
     unit.ingredients.forEach((ingredient, i) => {
-      const channel = x + (compact ? LANES[i] : CHANNELS[i]),
-        lane = x + LANES[i];
+      const channel = x + geometry.channels[i],
+        lane = x + geometry.lanes[i];
       const bend = compact ? -2 : i === 0 ? -3 : -2;
       for (let y = compact ? -2 : -3; y < bend; y++)
         belt(channel, y, SOUTH);
@@ -232,7 +267,7 @@ export function createLayout(
         belt(lane, y, SOUTH);
     });
     for (let y = -2; y <= (count - 1) * rowSpacing; y++)
-      belt(x + 3, y, NORTH);
+      belt(x + geometry.outputBelt, y, NORTH);
     for (let i = 0; i < count; i++) {
       const y = i * rowSpacing;
       add(
@@ -241,7 +276,7 @@ export function createLayout(
         y,
         unit.factory === "electric-furnace" ? {} : { recipe: unit.recipe },
       );
-      add(plan.outputStackSize > 1 ? "stack-inserter" : "fast-inserter", x + 2, y, {
+      add(plan.outputStackSize > 1 ? "stack-inserter" : "fast-inserter", x + geometry.outputInserter, y, {
         direction: WEST,
         // A full hand is exactly one belt stack, even with higher research.
         ...(plan.outputStackSize > 1 ? { override_stack_size: plan.outputStackSize } : {}),
@@ -251,39 +286,45 @@ export function createLayout(
       if (unit.ingredients[1])
         add("long-handed-inserter", x - 2, y + 1, { direction: WEST });
       if (unit.ingredients[2])
-        add("long-handed-inserter", x + 2, y + 1, { direction: EAST });
-      if (!compact) pole(x, y + 2);
+        add("long-handed-inserter", x + geometry.outputInserter, y + 1, { direction: EAST });
+      if (!compact) pole(x, y + geometry.poleGap);
       else if (i % 2 === 0) {
-        // Touching machines leave no center gap. Side poles cover two machines
-        // and all four inserters per machine, with six tiles between pole pairs.
-        pole(x - 2, y + 2);
-        pole(x + 2, y + 2);
+        // Side poles cover two touching machine rows and their inserters.
+        pole(x - 2, y + geometry.poleGap);
+        pole(x + geometry.poleRight, y + geometry.poleGap);
       }
     }
     pole(x - 2, -2);
-    pole(x + 2, -2);
+    pole(x + geometry.outputInserter, -2);
     if (!compact && x < columns.at(-1).x) pole(x + 10, -2);
-    annotations.push({ x, y: -1, item: unit.recipe, kind: "machine", count });
+    annotations.push({
+      x: x + geometry.centerOffset - 0.5,
+      y: -1,
+      item: unit.recipe,
+      kind: "machine",
+      count,
+    });
   }
   // Explicit Factorio 2.0 copper-wire spanning tree, within the 9-tile reach.
   const wired = new Set([poles[0]]),
-    wires = [];
-  while (wired.size < poles.length) {
-    let edge;
-    for (const a of wired)
-      for (const b of poles)
-        if (!wired.has(b)) {
-          const distance = Math.hypot(
-            a.position.x - b.position.x,
-            a.position.y - b.position.y,
-          );
-          if (distance <= 9 && (!edge || distance < edge.distance))
-            edge = { a, b, distance };
-        }
-    if (!edge) throw new Error("The layout has a disconnected power pole.");
-    wires.push([edge.a.entity_number, 5, edge.b.entity_number, 5]);
-    wired.add(edge.b);
+    wires = [],
+    queue = [poles[0]];
+  while (queue.length) {
+    const a = queue.pop();
+    for (const b of poles) {
+      if (wired.has(b)) continue;
+      const distance = Math.hypot(
+        a.position.x - b.position.x,
+        a.position.y - b.position.y,
+      );
+      if (distance > 9) continue;
+      wires.push([a.entity_number, 5, b.entity_number, 5]);
+      wired.add(b);
+      queue.push(b);
+    }
   }
+  if (wired.size !== poles.length)
+    throw new Error("The layout has a disconnected power pole.");
   const description = [
     "Inputs enter from the west; outputs leave to the east. Connect the poles to power.",
     ...(compact
@@ -344,7 +385,12 @@ export function createLayout(
         top: Math.min(...buses.map((bus) => bus.row)) - 3,
         right: rightEdge + 2,
         bottom: Math.max(
-          ...columns.map((column) => (column.count - 1) * ROW_SPACING + 4),
+        ...columns.map(
+          (column) =>
+            (column.count - 1) * column.geometry.rowSpacing +
+            column.geometry.size +
+            1,
+        ),
         ),
       };
   return {

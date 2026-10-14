@@ -9,6 +9,8 @@ export const MAX_OUTPUTS = RECIPES.length;
 export const DEFAULT_CONFIG = {
   outputs: [{ recipe: "electronic-circuit", rate: 60 }],
   assembler: "assembling-machine-2",
+  electronicsMachine: "assembling",
+  spaceAge: false,
   belt: "transport-belt",
   rateUnit: "items/min",
   inputStackSize: 1,
@@ -25,13 +27,41 @@ export const title = (id) =>
   id.replaceAll("-", " ").replace(/^./, (c) => c.toUpperCase());
 const addRate = (map, name, rate) => map.set(name, (map.get(name) || 0) + rate);
 
+const machineFor = (factory) =>
+  typeof factory === "string" ? MACHINES[factory] : factory;
+
+export function canCraft(factory, recipe) {
+  const machine = machineFor(factory);
+  return Boolean(machine && recipe && machine.categories?.includes(recipe.category));
+}
+
+export function productivityFor(recipe, factory) {
+  if (!recipe?.allowProductivity) return 0;
+  return machineFor(factory)?.productivity ?? 0;
+}
+
+export function factoryFor(recipe, config = {}) {
+  const override = config.machineOverrides?.[recipe.id]?.factory;
+  if (override) return override;
+  if (recipe.category === "smelting") return "electric-furnace";
+  const electronicsFactory = "electromagnetic-plant";
+  if (
+    config.spaceAge === true &&
+    config.electronicsMachine === electronicsFactory &&
+    canCraft(electronicsFactory, recipe)
+  )
+    return electronicsFactory;
+  return config.assembler ?? DEFAULT_CONFIG.assembler;
+}
+
 // Deliberately conservative, one-item-hand transfer budgets for this layout,
 // below the wiki's measured normal-quality belt transfer rates. These are
 // planning assumptions, not a tick simulation: https://wiki.factorio.com/Inserters
 export function craftingCapacity(recipe, factory, outputStackSize = 1) {
   return Math.min(
     (MACHINES[factory].speed * 60) / recipe.time,
-    (90 * outputStackSize) / recipe.results[0].amount,
+    (90 * outputStackSize) /
+      (recipe.results[0].amount * (1 + productivityFor(recipe, factory))),
     ...recipe.ingredients.map(
       (ingredient, index) => (index === 0 ? 90 : 45) / ingredient.amount,
     ),
@@ -45,14 +75,16 @@ function positive(value, label, max = 100000) {
   return number;
 }
 
-export function validateUnit(unit) {
+export function validateUnit(unit, config = {}) {
   const recipe = recipeById[unit.recipe];
   if (!recipe)
     throw new Error(
       `${title(String(unit.recipe))} is not supported. Choose a recipe from the solid-item catalog; fluids and modded recipes need a different layout.`,
     );
   const machine = MACHINES[unit.factory];
-  if (!machine || machine.category !== recipe.category)
+  if (machine?.spaceAge && config.spaceAge !== true)
+    throw new Error(`Enable Space Age to use ${machine.name}.`);
+  if (!machine || !canCraft(machine, recipe))
     throw new Error(
       `${title(String(unit.factory))} cannot be used for ${recipe.name}. Use ${recipe.category === "smelting" ? "an electric furnace" : "an assembling machine"}.`,
     );
@@ -90,12 +122,13 @@ function orderedUnits(units) {
 }
 
 export function finishPlan(units, inputs, outputs, config = {}) {
-  const { belt, rateUnit, inputStackSize, outputStackSize } = transportSettings(config);
+  const { belt, rateUnit, inputStackSize, outputStackSize, spaceAge } = transportSettings(config);
+  const effectiveConfig = { ...config, spaceAge };
   const layoutMode = config.layoutMode ?? DEFAULT_CONFIG.layoutMode;
   if (!["standard", "compact"].includes(layoutMode))
     throw new Error("Choose a standard or compact layout.");
   const maxMachines = Number(config.maxMachines ?? 200);
-  const ordered = orderedUnits(units.map(validateUnit));
+  const ordered = orderedUnits(units.map((unit) => validateUnit(unit, effectiveConfig)));
   const machineCount = ordered.reduce((sum, unit) => sum + unit.count, 0);
   if (!machineCount) throw new Error("Add at least one production step.");
   const issues = [];
@@ -123,8 +156,15 @@ export function finishPlan(units, inputs, outputs, config = {}) {
   // Merges side-load one belt lane. Budget against that lane, not the full belt.
   const traffic = new Map();
   for (const unit of ordered)
-    for (const result of unit.results)
-      addRate(traffic, result.name, unit.crafts * result.amount);
+    for (const result of unit.results) {
+      const recipe = recipeById[unit.recipe];
+      const productivity = productivityFor(recipe, unit.factory);
+      addRate(
+        traffic,
+        result.name,
+        unit.crafts * result.amount * (1 + productivity),
+      );
+    }
   for (const input of inputs) addRate(traffic, input.name, input.rate);
   const transport = [...traffic].map(([name, rate]) => {
     // Only external supplies use the input stack assumption. Every local
@@ -151,8 +191,8 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     issues,
     warnings: [
       `Sizing includes conservative inserter budgets (90 items/min for fast, 45 for long-handed${outputStackSize > 1 ? `, ${90 * outputStackSize} for stack outputs` : ""}). Normal quality, no modules. Actual belt loading can affect throughput; verify the line in Factorio.`,
-      ...(belt === "turbo-transport-belt" || inputStackSize > 1 || outputStackSize > 1
-        ? [`Requires Space Age.${belt === "turbo-transport-belt" ? " Green belts require Turbo transport belt research." : ""}`] : []),
+      ...(belt === "turbo-transport-belt"
+        ? ["Green belts require Turbo transport belt research."] : []),
       ...(inputStackSize > 1 ? [`Supply every external input in stacks of at least ${inputStackSize} items. The blueprint does not stack incoming supplies.`] : []),
       ...(outputStackSize > 1 ? [`Stack inserters load all machine outputs, including intermediates, in batches of ${outputStackSize}. Requires ${["", "", "Stack inserter", "Transport belt capacity 1", "Transport belt capacity 2"][outputStackSize]} research or higher. Allow time for full batches at startup.`] : []),
     ],
@@ -166,7 +206,8 @@ export function formatRate(value) {
 }
 
 export function planProduction(config) {
-  const { belt, rateUnit, outputStackSize } = transportSettings(config);
+  const { belt, rateUnit, outputStackSize, spaceAge } = transportSettings(config);
+  const effectiveConfig = { ...config, spaceAge };
   if (
     !Array.isArray(config.outputs) ||
     !config.outputs.length ||
@@ -175,10 +216,11 @@ export function planProduction(config) {
     throw new Error(`Choose between 1 and ${MAX_OUTPUTS} output targets.`);
   if (
     !MACHINES[config.assembler] ||
-    MACHINES[config.assembler].category !== "crafting"
+    !MACHINES[config.assembler].categories?.includes("crafting")
   )
     throw new Error("Choose an assembling machine tier.");
   const demand = new Map(),
+    factories = new Map(),
     external = new Map(),
     targets = new Map(),
     issues = [];
@@ -201,14 +243,19 @@ export function planProduction(config) {
     if (!recipe)
       throw new Error(`${title(name)} is not in the supported recipe catalog.`);
     if (stack.has(name)) throw new Error(`Recipe cycle at ${recipe.name}.`);
-    addRate(demand, name, rate / recipe.results[0].amount);
+    const factory = factoryFor(recipe, effectiveConfig);
+    const machine = MACHINES[factory];
+    if (machine?.spaceAge && !spaceAge)
+      throw new Error(`Enable Space Age to use ${machine.name}.`);
+    if (!machine || !canCraft(machine, recipe))
+      throw new Error(`Select a compatible machine for ${recipe.name}.`);
+    const crafts = rate /
+      (recipe.results[0].amount * (1 + productivityFor(recipe, factory)));
+    addRate(demand, name, crafts);
+    factories.set(name, factory);
     const next = new Set(stack).add(name);
     for (const ingredient of recipe.ingredients)
-      requireItem(
-        ingredient.name,
-        (rate * ingredient.amount) / recipe.results[0].amount,
-        next,
-      );
+      requireItem(ingredient.name, crafts * ingredient.amount, next);
   }
   for (const output of config.outputs) {
     if (!output || !Object.hasOwn(recipeById, output.recipe))
@@ -222,11 +269,9 @@ export function planProduction(config) {
   const units = [...demand].map(([recipeId, crafts]) => {
     const recipe = recipeById[recipeId];
     const override = config.machineOverrides?.[recipeId] || {};
-    const factory =
-      override.factory ||
-      (recipe.category === "smelting" ? "electric-furnace" : config.assembler);
+    const factory = factories.get(recipeId) || factoryFor(recipe, effectiveConfig);
     const machine = MACHINES[factory];
-    if (!machine || machine.category !== recipe.category)
+    if (!machine || !canCraft(machine, recipe))
       throw new Error(`Select a compatible machine for ${recipe.name}.`);
     const required = Math.max(
       1,
@@ -259,7 +304,7 @@ export function planProduction(config) {
     units,
     [...external].map(([name, rate]) => ({ name, rate })),
     [...targets].map(([name, rate]) => ({ name, rate })),
-    config,
+    effectiveConfig,
   );
   plan.issues.push(...issues);
   return plan;

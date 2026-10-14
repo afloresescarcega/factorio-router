@@ -46,6 +46,14 @@ describe('validateBlueprintString', () => {
     assert.deepEqual(result.errors, []);
   });
 
+  test('accepts the electromagnetic plant from the Space Age name patch', () => {
+    const bp = validBlueprint();
+    bp.blueprint.entities[0].name = 'electromagnetic-plant';
+    const result = validateBlueprintString(encodeBlueprint(bp));
+    assert.equal(result.ok, true, result.errors.join('\n'));
+    assert.deepEqual(result.errors, []);
+  });
+
   test('rejects an entity with a name unknown to Factorio', () => {
     const bp = validBlueprint();
     bp.blueprint.entities[0].name = 'not-a-real-entity';

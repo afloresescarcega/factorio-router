@@ -3,11 +3,14 @@
  *
  * Source: Wube Software Ltd., factorio-data tag 2.0.72:
  * https://github.com/wube/factorio-data/blob/2.0.72/base/prototypes/recipe.lua
+ * Space Age recipe category and ingredient updates:
+ * https://github.com/wube/factorio-data/blob/2.0.72/space-age/base-data-updates.lua
  *
  * `time` is the prototype's energy_required value in seconds.  Factorio
  * recipes without an explicit energy_required use the 0.5 second default.
  * This subset keeps solid-item, single-result recipes with no more than three
- * item ingredient types and only the crafting/smelting categories supported
+ * item ingredient types and only the crafting, electronics, pressing, and
+ * smelting categories supported
  * by MACHINES below.  Dependencies that are outside this subset (for
  * example plastic-bar and explosives) are kept as their vanilla item names.
  */
@@ -60,6 +63,7 @@ export const RECIPES = [
     id: 'iron-gear-wheel',
     name: 'Iron gear wheel',
     category: 'crafting',
+    allowProductivity: true,
     time: 0.5,
     ingredients: [{ name: 'iron-plate', amount: 2 }],
     results: [{ name: 'iron-gear-wheel', amount: 1 }],
@@ -67,7 +71,8 @@ export const RECIPES = [
   {
     id: 'copper-cable',
     name: 'Copper cable',
-    category: 'crafting',
+    category: 'electronics',
+    allowProductivity: true,
     time: 0.5,
     ingredients: [{ name: 'copper-plate', amount: 1 }],
     results: [{ name: 'copper-cable', amount: 2 }],
@@ -75,7 +80,8 @@ export const RECIPES = [
   {
     id: 'electronic-circuit',
     name: 'Electronic circuit',
-    category: 'crafting',
+    category: 'electronics',
+    allowProductivity: true,
     time: 0.5,
     ingredients: [
       { name: 'iron-plate', amount: 1 },
@@ -86,7 +92,8 @@ export const RECIPES = [
   {
     id: 'advanced-circuit',
     name: 'Advanced circuit',
-    category: 'crafting',
+    category: 'electronics',
+    allowProductivity: true,
     time: 6,
     ingredients: [
       { name: 'electronic-circuit', amount: 2 },
@@ -136,7 +143,7 @@ export const RECIPES = [
   {
     id: 'transport-belt',
     name: 'Transport belt',
-    category: 'crafting',
+    category: 'pressing',
     time: 0.5,
     ingredients: [
       { name: 'iron-plate', amount: 1 },
@@ -147,7 +154,7 @@ export const RECIPES = [
   {
     id: 'fast-transport-belt',
     name: 'Fast transport belt',
-    category: 'crafting',
+    category: 'pressing',
     time: 0.5,
     ingredients: [
       { name: 'iron-gear-wheel', amount: 5 },
@@ -158,7 +165,7 @@ export const RECIPES = [
   {
     id: 'underground-belt',
     name: 'Underground belt',
-    category: 'crafting',
+    category: 'pressing',
     time: 1,
     ingredients: [
       { name: 'iron-plate', amount: 10 },
@@ -169,7 +176,7 @@ export const RECIPES = [
   {
     id: 'fast-underground-belt',
     name: 'Fast underground belt',
-    category: 'crafting',
+    category: 'pressing',
     time: 2,
     ingredients: [
       { name: 'iron-gear-wheel', amount: 40 },
@@ -180,7 +187,7 @@ export const RECIPES = [
   {
     id: 'splitter',
     name: 'Splitter',
-    category: 'crafting',
+    category: 'pressing',
     time: 1,
     ingredients: [
       { name: 'electronic-circuit', amount: 5 },
@@ -192,7 +199,7 @@ export const RECIPES = [
   {
     id: 'fast-splitter',
     name: 'Fast splitter',
-    category: 'crafting',
+    category: 'pressing',
     time: 2,
     ingredients: [
       { name: 'splitter', amount: 1 },
@@ -282,8 +289,8 @@ export const RECIPES = [
     category: 'crafting',
     time: 0.5,
     ingredients: [
-      { name: 'speed-module', amount: 4 },
       { name: 'assembling-machine-2', amount: 2 },
+      { name: 'speed-module', amount: 4 },
     ],
     results: [{ name: 'assembling-machine-3', amount: 1 }],
   },
@@ -328,7 +335,7 @@ export const RECIPES = [
   {
     id: 'small-electric-pole',
     name: 'Small electric pole',
-    category: 'crafting',
+    category: 'electronics',
     time: 0.5,
     ingredients: [
       { name: 'wood', amount: 1 },
@@ -339,7 +346,7 @@ export const RECIPES = [
   {
     id: 'medium-electric-pole',
     name: 'Medium electric pole',
-    category: 'crafting',
+    category: 'electronics',
     time: 0.5,
     ingredients: [
       { name: 'iron-stick', amount: 4 },
@@ -351,7 +358,7 @@ export const RECIPES = [
   {
     id: 'big-electric-pole',
     name: 'Big electric pole',
-    category: 'crafting',
+    category: 'electronics',
     time: 0.5,
     ingredients: [
       { name: 'iron-stick', amount: 8 },
@@ -363,7 +370,7 @@ export const RECIPES = [
   {
     id: 'substation',
     name: 'Substation',
-    category: 'crafting',
+    category: 'electronics',
     time: 0.5,
     ingredients: [
       { name: 'steel-plate', amount: 10 },
@@ -375,7 +382,7 @@ export const RECIPES = [
   {
     id: 'solar-panel',
     name: 'Solar panel',
-    category: 'crafting',
+    category: 'electronics',
     time: 10,
     ingredients: [
       { name: 'steel-plate', amount: 5 },
@@ -522,22 +529,42 @@ export const MACHINES = {
   'assembling-machine-1': {
     name: 'Assembling machine 1',
     speed: 0.5,
-    category: 'crafting',
+    categories: ['crafting', 'electronics', 'pressing'],
+    size: 3,
+    productivity: 0,
+    spaceAge: false,
   },
   'assembling-machine-2': {
     name: 'Assembling machine 2',
     speed: 0.75,
-    category: 'crafting',
+    categories: ['crafting', 'electronics', 'pressing'],
+    size: 3,
+    productivity: 0,
+    spaceAge: false,
   },
   'assembling-machine-3': {
     name: 'Assembling machine 3',
     speed: 1.25,
-    category: 'crafting',
+    categories: ['crafting', 'electronics', 'pressing'],
+    size: 3,
+    productivity: 0,
+    spaceAge: false,
   },
   'electric-furnace': {
     name: 'Electric furnace',
     speed: 2,
-    category: 'smelting',
+    categories: ['smelting'],
+    size: 3,
+    productivity: 0,
+    spaceAge: false,
+  },
+  'electromagnetic-plant': {
+    name: 'Electromagnetic plant',
+    speed: 2,
+    productivity: 0.5,
+    categories: ['electronics'],
+    size: 4,
+    spaceAge: true,
   },
 };
 
