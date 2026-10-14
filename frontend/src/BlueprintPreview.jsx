@@ -11,21 +11,25 @@ const COLORS = {
 };
 const WIRE = "#c8763a";
 const GRID = "#372f27";
+function entityColor(name, { machine, pole, inserter }) {
+  if (machine) return name === "electromagnetic-plant" ? "#d8a143" : COLORS.machine;
+  if (pole) return COLORS.pole;
+  if (inserter) return name === "stack-inserter" ? "#c9ded3" : COLORS.inserter;
+  return name.startsWith("turbo-") ? "#6ebd77" : COLORS.belt;
+}
+function machineLabel(name) {
+  if (name === "electromagnetic-plant") return "EM";
+  if (name === "electric-furnace") return "EF";
+  return `A${name.at(-1)}`;
+}
 function Entity({ entity }) {
   const [w, h] = entitySize(entity);
   const { x, y } = entity.position;
   const machine = Object.hasOwn(MACHINES, entity.name);
-  const electromagneticPlant = entity.name === "electromagnetic-plant";
   const pole = entity.name === "medium-electric-pole";
   const inserter = entity.name.includes("inserter");
   const underground = entity.name.includes("underground");
-  const color = machine
-    ? electromagneticPlant ? "#d8a143" : COLORS.machine
-    : pole
-      ? COLORS.pole
-      : inserter
-        ? entity.name === "stack-inserter" ? "#c9ded3" : COLORS.inserter
-        : entity.name.startsWith("turbo-") ? "#6ebd77" : COLORS.belt;
+  const color = entityColor(entity.name, { machine, pole, inserter });
   return (
     <g>
       <title>
@@ -63,11 +67,7 @@ function Entity({ entity }) {
             fontSize=".44"
             fill="#ffe6c0"
           >
-            {electromagneticPlant
-              ? "EM"
-              : entity.name === "electric-furnace"
-              ? "EF"
-              : `A${entity.name.at(-1)}`}
+            {machineLabel(entity.name)}
           </text>
         </>
       )}

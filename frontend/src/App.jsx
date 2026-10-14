@@ -337,7 +337,7 @@ export default function App() {
                   aria-label="Space Age"
                   checked={Boolean(config.spaceAge)}
                   onChange={(e) => setSpaceAge(e.target.checked)}
-                />
+                />{" "}
                 Space Age
               </label>
               <label className="field">
@@ -364,7 +364,7 @@ export default function App() {
               </label>
               {config.spaceAge && (
                 <label className="field">
-                  Electronics machine
+                  Electronics machine{" "}
                   <select
                     aria-label="Electronics machine"
                     value={config.electronicsMachine ?? "assembling"}

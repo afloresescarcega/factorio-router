@@ -41,6 +41,12 @@ export function machineGeometry(factory, compact = false) {
   };
 }
 
+// A column's rightmost lane: its output belt, or a third ingredient lane.
+function rightExtent({ unit, geometry }) {
+  const thirdLane = unit.ingredients.length === 3 ? [geometry.lanes[2]] : [];
+  return Math.max(geometry.outputBelt, ...thirdLane);
+}
+
 // Keep recipe dependency order while packing the lanes and their splitter taps.
 // A spare tile between columns prevents a downstream splitter from occupying
 // the preceding column's tap or output feeder on a shared material bus.
@@ -52,14 +58,7 @@ function arrange(plan, compact, columnLimit) {
       const geometry = machineGeometry(unit.factory, compact);
       const usedLanes = geometry.lanes.slice(0, unit.ingredients.length);
       const leftLane = Math.min(...usedLanes);
-      const previousRight = previous
-        ? Math.max(
-            previous.geometry.outputBelt,
-            ...(previous.unit.ingredients.length === 3
-              ? [previous.geometry.lanes[2]]
-              : []),
-          )
-        : 0;
+      const previousRight = previous ? rightExtent(previous) : 0;
       columns.push({
         unit,
         geometry,
@@ -96,10 +95,7 @@ function arrange(plan, compact, columnLimit) {
   const leftEdge = compact
     ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
     : -12;
-  const rightOfLast = Math.max(
-    last.geometry.outputBelt,
-    ...(last.unit.ingredients.length === 3 ? [last.geometry.lanes[2]] : []),
-  );
+  const rightOfLast = rightExtent(last);
   const rightEdge = last.x + (compact ? rightOfLast + 2 : rightOfLast + 8);
   for (const bus of buses) {
     bus.external = plan.inputs.some((input) => input.name === bus.item);
