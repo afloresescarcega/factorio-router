@@ -336,3 +336,47 @@ test("importing a Helmod electromagnetic plant enables Space Age", () => {
   expect(screen.getByLabelText("Electronics machine")).toBeInTheDocument();
   expect(screen.getByLabelText("Machine for Electronic circuit")).toHaveValue("electromagnetic-plant");
 });
+
+test("reset can be undone, and any later edit drops the undo", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "120" } });
+  fireEvent.click(screen.getByRole("button", { name: "Reset example" }));
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(60);
+  expect(screen.getByRole("status")).toHaveTextContent("Example line restored.");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(screen.getByLabelText("Output rate 1")).toHaveValue(120);
+  expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset example" }));
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "30" } });
+  expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+});
+
+test("view tabs follow the arrow keys with a single tab stop", () => {
+  render(<App />);
+  const layout = screen.getByRole("tab", { name: "Layout", exact: true });
+  expect(layout).toHaveAttribute("tabindex", "0");
+  fireEvent.keyDown(layout, { key: "ArrowRight" });
+  const materials = screen.getByRole("tab", { name: "Build list" });
+  expect(materials).toHaveAttribute("aria-selected", "true");
+  expect(materials).toHaveFocus();
+  expect(layout).toHaveAttribute("tabindex", "-1");
+  fireEvent.keyDown(layout, { key: "ArrowLeft" });
+  expect(screen.getByRole("tab", { name: "Blueprint string" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("a supply limit below demand is flagged on its own field", () => {
+  render(<App />);
+  const limit = screen.getByLabelText("Iron plate supply limit");
+  expect(limit).not.toHaveAttribute("aria-invalid");
+  fireEvent.change(limit, { target: { value: "10" } });
+  expect(limit).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByText(/limit is 50 short/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Copper plate supply limit")).not.toHaveAttribute("aria-invalid");
+});
+
+test("output feedback uses singular units and names an over-capacity lane", () => {
+  render(<App />);
+  expect(screen.getByText(/^1 item\/s · 60 items\/min/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "1000" } });
+  expect(screen.getByText(/over lane capacity/)).toBeInTheDocument();
+});

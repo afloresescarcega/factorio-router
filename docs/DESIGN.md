@@ -109,7 +109,7 @@ Buttons use a third recipe, `--face`, which is declared **on the element**
 rather than on `:root`:
 
 ```css
-button, .brand-mark, .status-chip {
+button, .brand-mark {
   --lip: var(--steel-hi);
   --face: inset 0 10px 2px -8px var(--lip), /* … */;
   box-shadow: var(--face);
@@ -136,6 +136,11 @@ shadow stack.
 - **Focus** is a 2px `--orange-lit` outline plus a warm glow. Never remove it.
 - **Disabled** is `opacity: .4` plus `saturate(.4)` so green and orange stop shouting.
 - **Pressing** a button swaps `--face` for `--btn-press` (the inverted bevel) and nudges it 1px down. It should feel like it physically moves.
+- **Status is a readout, not a control.** The layout status sits in a sunken lamp housing with a lit indicator (green ready, red check). A raised green plate read as a confirm button.
+- **Warnings are full plates.** The constraint error is a tinted sunken plate under a red hazard band across its top edge, never a coloured bar down one side.
+- **Errors point at their cause.** A supply limit below demand marks its own field (`aria-invalid`, red well outline, "limit is N short") as well as the summary plate.
+- **No eyebrow labels** above headings; the heading carries its own weight.
+- **Icons are drawn SVG** in `currentColor` (brand mark, remove, empty state), not Unicode glyphs.
 - **Lists of countable things** (the build list) are inventory slot grids: sunken cells, name left, amber count right.
 
 ---
@@ -145,8 +150,9 @@ shadow stack.
 The style is dark and low-contrast by nature, so these are non-negotiable:
 
 - Body text meets **WCAG AA (4.5:1)** against the surface behind it. `--dim` is the darkest permitted ink on `--panel`; anything dimmer needs a darker well behind it.
-- Button labels are dark ink on light faces, which clears AA on steel, orange and green. Red could not — so the invalid status chip uses **light ink on a darker red** (`#a33328`/`#ffe6e0`, 5.6:1) instead.
-- State is never colour alone: the status chip changes its text, and constraint failures also render a written alert.
+- Button labels are dark ink on light faces, which clears AA on steel, orange and green. Red could not, so red status text (`--red-hi`) sits on the darkest well instead of on a red face.
+- State is never colour alone: the status chip changes its text, constraint failures also render a written alert, and an over-capacity output lane says "over lane capacity" in words.
+- Secondary text and hints use `--muted`; `--dim` is reserved for placeholders and decoration. Small UI text stays at or above 0.75rem.
 - Transitions are dropped under `prefers-reduced-motion`.
 
 ---
