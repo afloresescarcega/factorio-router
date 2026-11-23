@@ -18,6 +18,21 @@ import BlueprintPreview from "./BlueprintPreview.jsx";
 import { RATE_UNITS, convertRateUnit, numericRate, rateExceeds, rateScale } from "./transport.js";
 import "./App.css";
 
+// Mirror Factorio's crafting-menu tabs so players find items where the game puts them.
+const RECIPE_GROUPS = [
+  ["Logistics", /belt|splitter|inserter|pole|substation|pipe|pump/],
+  ["Production", /drill|assembling|furnace|^lab$|radar|solar|repair/],
+  ["Combat", /wall|turret|magazine|gun|grenade|shell|rocket/],
+  ["Intermediate products", /./],
+];
+const GROUPED_RECIPES = RECIPE_GROUPS.map(([name]) => [name, []]);
+for (const recipe of RECIPES) {
+  const index = RECIPE_GROUPS.findIndex(([, pattern]) => pattern.test(recipe.id));
+  GROUPED_RECIPES[index][1].push(recipe);
+}
+// Intermediates first: they are what most lines are built to make.
+const GROUP_ORDER = [3, 0, 1, 2];
+
 function RecipeSelect({ value, onChange, label, selected }) {
   return (
     <select
@@ -25,13 +40,30 @@ function RecipeSelect({ value, onChange, label, selected }) {
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
-      {RECIPES.map((recipe) => (
-        <option key={recipe.id} value={recipe.id} disabled={recipe.id !== value && selected.includes(recipe.id)}>
-          {recipe.name}
-        </option>
-      ))}
+      {GROUP_ORDER.map((index) => {
+        const [group, recipes] = GROUPED_RECIPES[index];
+        return (
+          <optgroup key={group} label={group}>
+            {recipes.map((recipe) => (
+              <option key={recipe.id} value={recipe.id} disabled={recipe.id !== value && selected.includes(recipe.id)}>
+                {recipe.name}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
     </select>
   );
+}
+
+const VIEWS = [
+  ["layout", "Layout"],
+  ["materials", "Build list"],
+  ["export", "Blueprint string"],
+];
+
+function perSecond(rate) {
+  return `${formatRate(rate)} ${rate === 1 ? "item" : "items"}/s`;
 }
 const initialConfig = () => ({
   ...DEFAULT_CONFIG,
@@ -44,9 +76,23 @@ export default function App() {
   const [importError, setImportError] = useState("");
   const [status, setStatus] = useState("");
   const [view, setView] = useState("layout");
+  // Reset and import replace the whole line; keep the previous one so either can be undone.
+  const [undoConfig, setUndoConfig] = useState(null);
   const update = (patch) => {
     setConfig((current) => ({ ...current, ...patch }));
     setStatus("");
+    setUndoConfig(null);
+  };
+  const replaceConfig = (next, message) => {
+    const previous = config;
+    update(next);
+    setUndoConfig(previous);
+    setStatus(message);
+  };
+  const undo = () => {
+    setConfig(undoConfig);
+    setUndoConfig(null);
+    setStatus("Previous line restored.");
   };
   // Planning and the SVG preview are heavy for large lines; let inputs update
   // first and recompute in a low-priority render that typing can interrupt.
@@ -166,7 +212,10 @@ export default function App() {
           config.outputStackSize > 1 ||
           imported.units.some((unit) => MACHINES[unit.factory]?.spaceAge),
       );
-      update({
+      const ignoredEffects = imported.warnings.some((warning) =>
+        warning.startsWith("Helmod modules, beacons"),
+      );
+      replaceConfig({
         ...DEFAULT_CONFIG,
         outputs: imported.outputs.map(({ name, rate }) => ({
           recipe: name,
@@ -187,11 +236,7 @@ export default function App() {
             { factory: unit.factory, count: unit.count },
           ]),
         ),
-      });
-      const ignoredEffects = imported.warnings.some((warning) =>
-        warning.startsWith("Helmod modules, beacons"),
-      );
-      setStatus(
+      },
         `Helmod line imported. Its targets, inputs, and machine counts are now editable below. Built-in plant productivity is included where recipes allow it.${ignoredEffects ? " Helmod modules, beacons, and non-normal quality were ignored." : ""}`,
       );
     } catch (error) {
@@ -203,18 +248,21 @@ export default function App() {
       <header className="app-header">
         <a className="brand" href="./">
           <span className="brand-mark" aria-hidden="true">
-            ↱
+            <svg viewBox="0 0 64 64" width="18" height="18">
+              <path d="M15 51V21h29m-8-7 8 7-8 7" fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="square" />
+            </svg>
           </span>
           <span>
             FACTORIO<span className="brand-light"> / ROUTER</span>
           </span>
         </a>
-        <span className="version-label">FACTORIO 2.0 · SOLID ITEMS</span>
+        <span className="version-label">
+          FACTORIO 2.0{config.spaceAge ? " · SPACE AGE" : ""} · SOLID ITEMS
+        </span>
       </header>
       <main>
         <div className="page-heading">
           <div>
-            <p className="eyebrow">PRODUCTION WORKSPACE</p>
             <h1>Plan the line. See the blueprint.</h1>
             <p>
               Choose what to make, set your limits, and take the layout into
@@ -224,7 +272,7 @@ export default function App() {
           <button
             className="quiet"
             onClick={() => {
-              update(initialConfig());
+              replaceConfig(initialConfig(), "Example line restored.");
               setImportError("");
             }}
           >
@@ -257,7 +305,7 @@ export default function App() {
               <div className="output-targets">
               {config.outputs.map((output, i) => (
                 <div className="output-target" key={i}>
-                <div className="output-row" key={i}>
+                <div className="output-row">
                   <label className="sr-only" htmlFor={`rate-${i}`}>
                     Output rate {i + 1}
                   </label>
@@ -288,15 +336,22 @@ export default function App() {
                       })
                     }
                   >
-                    ×
+                    <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                      <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
+                    </svg>
                   </button>
                 </div>
-                {numericRate(output.rate) > 0 && (
-                  <p className={`rate-feedback ${rateExceeds(Number(output.rate) * outputScale, outputLaneCapacity) ? "over-capacity" : ""}`}>
-                    {formatRate(Number(output.rate) * outputScale / 60)} items/s · {formatRate(Number(output.rate) * outputScale)} items/min
-                    {" · "}{formatRate(Number(output.rate) * outputScale / outputLaneCapacity * 100)}% of output lane
-                  </p>
-                )}
+                {numericRate(output.rate) > 0 && (() => {
+                  const perMinute = Number(output.rate) * outputScale;
+                  const over = rateExceeds(perMinute, outputLaneCapacity);
+                  return (
+                    <p className={`rate-feedback ${over ? "over-capacity" : ""}`}>
+                      {perSecond(perMinute / 60)} · {formatRate(perMinute)} items/min
+                      {" · "}{formatRate(perMinute / outputLaneCapacity * 100)}% of output lane
+                      {over && <strong> · over lane capacity</strong>}
+                    </p>
+                  );
+                })()}
                 </div>
               ))}
               </div>
@@ -337,7 +392,6 @@ export default function App() {
               <label className="check-row">
                 <input
                   type="checkbox"
-                  aria-label="Space Age"
                   checked={Boolean(config.spaceAge)}
                   onChange={(e) => setSpaceAge(e.target.checked)}
                 />{" "}
@@ -465,11 +519,19 @@ export default function App() {
                 {config.inputStackSize > 1 && ` Supply all inputs in stacks of at least ${config.inputStackSize}.`}
                 {config.rateUnit === "belts" && ` 1 input belt = ${formatRate(inputScale / 60)} items/s at ${config.inputStackSize} item${config.inputStackSize === 1 ? "" : "s"} high.`}
               </p>
-              {plan?.inputs.map((input) => (
-                <div className="input-row" key={input.name}>
+              {plan?.inputs.map((input) => {
+                const need = input.rate / inputScale;
+                const limit = numericRate(config.inputLimits[input.name]);
+                const short = Number.isFinite(limit) && limit < need * (1 - 1e-9);
+                const unitLabel = config.rateUnit === "belts" ? "belts" : config.rateUnit === "items/s" ? "/ sec" : "/ min";
+                return (
+                <div className={`input-row ${short ? "over-limit" : ""}`} key={input.name}>
                   <label htmlFor={`supply-${input.name}`}>
                     {title(input.name)}
-                    <small>Needs {formatRate(input.rate / inputScale)} {config.rateUnit === "belts" ? "belts" : config.rateUnit === "items/s" ? "/ sec" : "/ min"}</small>
+                    <small>
+                      Needs {formatRate(need)} {unitLabel}
+                      {short && <strong> · limit is {formatRate(need - limit)} short</strong>}
+                    </small>
                   </label>
                   <input
                     aria-label={`${title(input.name)} supply limit`}
@@ -479,7 +541,7 @@ export default function App() {
                     step="any"
                     placeholder="Unlimited"
                     value={config.inputLimits[input.name] ?? ""}
-
+                    aria-invalid={short || undefined}
                     onChange={(e) =>
                       update({
                         inputLimits: {
@@ -490,7 +552,8 @@ export default function App() {
                     }
                   />
                 </div>
-              ))}
+                );
+              })}
               {!plan && (
                 <p className="help">
                   Fix the targets above to calculate required inputs.
@@ -534,16 +597,13 @@ export default function App() {
           <div className="results">
             <section className="panel blueprint-panel">
               <div className="result-heading">
-                <div>
-                  <p className="eyebrow">LIVE BLUEPRINT</p>
-                  <h2>
-                    {plan
-                      ? plan.outputs.length > 3 ? `${plan.outputs.length} output targets` : plan.outputs
-                          .map((output) => title(output.name))
-                          .join(" + ")
-                      : "Your production line"}
-                  </h2>
-                </div>
+                <h2>
+                  {plan
+                    ? plan.outputs.length > 3 ? `${plan.outputs.length} output targets` : plan.outputs
+                        .map((output) => title(output.name))
+                        .join(" + ")
+                    : "Your production line"}
+                </h2>
                 <span className={`status-chip ${layout ? "" : "invalid"}`}>
                   {layout ? "Layout ready" : "Check constraints"}
                 </span>
@@ -594,18 +654,23 @@ export default function App() {
                 role="tablist"
                 aria-label="Blueprint views"
               >
-                {[
-                  ["layout", "Layout"],
-                  ["materials", "Build list"],
-                  ["export", "Blueprint string"],
-                ].map(([id, label]) => (
+                {VIEWS.map(([id, label], index) => (
                   <button
                     role="tab"
                     id={`tab-${id}`}
-                    aria-controls={`view-${id}`}
+                    aria-controls={view === id ? `view-${id}` : undefined}
                     aria-selected={view === id}
+                    tabIndex={view === id ? 0 : -1}
                     key={id}
                     onClick={() => setView(id)}
+                    onKeyDown={(e) => {
+                      const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+                      if (!step) return;
+                      e.preventDefault();
+                      const [next] = VIEWS[(index + step + VIEWS.length) % VIEWS.length];
+                      setView(next);
+                      e.currentTarget.parentElement.querySelector(`#tab-${next}`)?.focus();
+                    }}
                   >
                     {label}
                   </button>
@@ -618,10 +683,15 @@ export default function App() {
               >
                 {!layout ? (
                   <div className="empty-preview">
-                    <span aria-hidden="true">⌑</span>
+                    <svg viewBox="0 0 48 42" width="48" height="42" aria-hidden="true">
+                      <path d="M24 3 45 39H3Z" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+                      <path d="M24 16v11" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" />
+                      <circle cx="24" cy="33" r="2.2" fill="currentColor" />
+                    </svg>
                     <p>
-                      The preview will appear when the line meets your
-                      constraints.
+                      {plan?.issues.length
+                        ? "No blueprint yet. Fix the limits listed above and the preview returns."
+                        : "The preview will appear when the line meets your constraints."}
                     </p>
                   </div>
                 ) : view === "layout" ? (
@@ -672,9 +742,16 @@ export default function App() {
                   Copy blueprint <span aria-hidden="true">↗</span>
                 </button>
               </div>
-              <p role="status" aria-live="polite" className="action-status">
-                {status}
-              </p>
+              <div className="action-status-row">
+                <p role="status" aria-live="polite" className="action-status">
+                  {status}
+                </p>
+                {undoConfig && (
+                  <button className="text-button" onClick={undo}>
+                    Undo
+                  </button>
+                )}
+              </div>
             </section>
             {plan && (
               <section className="panel production-panel">
