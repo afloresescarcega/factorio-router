@@ -28,8 +28,8 @@ import "./App.css";
 
 // Mirror Factorio's crafting-menu tabs so players find items where the game puts them.
 const RECIPE_GROUPS = [
-  ["Logistics", /belt|splitter|inserter|pole|substation|pipe|pump/],
-  ["Production", /drill|assembling|furnace|^lab$|radar|solar|repair/],
+  ["Logistics", /belt|splitter|inserter|pole|substation|pipe|pump|^rail$/],
+  ["Production", /drill|assembling|furnace|^lab$|radar|solar|repair|module/],
   ["Combat", /wall|turret|magazine|gun|grenade|shell|rocket/],
   ["Intermediate products", /./],
 ];

@@ -466,3 +466,49 @@ test("processing units show piped sulfuric acid, pipe legend, and export valid p
   expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
   expect(screen.getByLabelText("Machine for Plastic bar")).toHaveValue("chemical-plant");
 });
+
+test("all six vanilla science packs are selectable, grouped properly, and export valid blueprints", () => {
+  render(<App />);
+  const select = screen.getByLabelText("Output recipe 1");
+  const groups = Object.fromEntries(
+    Array.from(select.querySelectorAll("optgroup")).map((group) => [
+      group.label,
+      Array.from(group.querySelectorAll("option")).map((opt) => opt.value),
+    ]),
+  );
+  expect(groups["Logistics"]).toContain("rail");
+  expect(groups["Production"]).toContain("productivity-module");
+  for (const pack of [
+    "automation-science-pack",
+    "logistic-science-pack",
+    "military-science-pack",
+    "chemical-science-pack",
+    "production-science-pack",
+    "utility-science-pack",
+  ]) {
+    expect(groups["Intermediate products"]).toContain(pack);
+  }
+
+  fireEvent.change(screen.getByLabelText("Belts"), {
+    target: { value: "express-transport-belt" },
+  });
+  fireEvent.change(screen.getByLabelText("Output rate 1"), {
+    target: { value: "15" },
+  });
+  fireEvent.change(select, { target: { value: "utility-science-pack" } });
+  expect(screen.getByLabelText("Lubricant supply limit")).toBeInTheDocument();
+  expect(screen.getByLabelText("Sulfuric acid supply limit")).toBeInTheDocument();
+  expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+  const utilityBp = decodeBlueprint(showExport().value).blueprint;
+  expect(utilityBp.entities.some((e) => e.recipe === "utility-science-pack")).toBe(true);
+  expect(utilityBp.entities.some((e) => e.recipe === "flying-robot-frame")).toBe(true);
+
+  fireEvent.change(select, { target: { value: "chemical-science-pack" } });
+  expect(screen.getByLabelText("Water supply limit")).toBeInTheDocument();
+  expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+  const chemBp = decodeBlueprint(showExport().value).blueprint;
+  expect(chemBp.entities.some((e) => e.recipe === "chemical-science-pack")).toBe(true);
+  expect(chemBp.entities.some((e) => e.recipe === "sulfur")).toBe(true);
+});

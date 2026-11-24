@@ -8,13 +8,14 @@
  *
  * `time` is the prototype's energy_required value in seconds.  Factorio
  * recipes without an explicit energy_required use the 0.5 second default.
- * This subset keeps single-solid-result recipes with up to three ingredients
- * (at most one fluid input and two solid inputs, or up to three solid inputs)
- * in the chemistry, crafting, crafting-with-fluid, electronics,
+ * This subset keeps single-solid-result recipes with up to four solid
+ * ingredients, up to two solid inputs plus one fluid input, or up to two fluid
+ * inputs in the chemistry, crafting, crafting-with-fluid, electronics,
  * electronics-with-fluid, pressing, and smelting categories supported by
  * MACHINES below.
- * Dependencies that are outside this subset (for example explosives and
- * sulfuric-acid) are kept as their vanilla item or fluid names.
+ * Dependencies that are outside this subset (for example explosives,
+ * lubricant, petroleum-gas, sulfuric-acid, and water) are kept as their
+ * vanilla item or fluid names.
  */
 
 export const RECIPES = [
@@ -104,6 +105,31 @@ export const RECIPES = [
     results: [{ name: 'plastic-bar', amount: 2 }],
   },
   {
+    id: 'sulfur',
+    name: 'Sulfur',
+    category: 'chemistry',
+    allowProductivity: true,
+    time: 1,
+    ingredients: [
+      { name: 'water', amount: 30, type: 'fluid' },
+      { name: 'petroleum-gas', amount: 30, type: 'fluid' },
+    ],
+    results: [{ name: 'sulfur', amount: 2 }],
+  },
+  {
+    id: 'battery',
+    name: 'Battery',
+    category: 'chemistry',
+    allowProductivity: true,
+    time: 4,
+    ingredients: [
+      { name: 'iron-plate', amount: 1 },
+      { name: 'copper-plate', amount: 1 },
+      { name: 'sulfuric-acid', amount: 20, type: 'fluid' },
+    ],
+    results: [{ name: 'battery', amount: 1 }],
+  },
+  {
     id: 'advanced-circuit',
     name: 'Advanced circuit',
     category: 'electronics',
@@ -128,6 +154,59 @@ export const RECIPES = [
       { name: 'sulfuric-acid', amount: 5, type: 'fluid' },
     ],
     results: [{ name: 'processing-unit', amount: 1 }],
+  },
+  {
+    id: 'engine-unit',
+    name: 'Engine unit',
+    category: 'crafting',
+    allowProductivity: true,
+    time: 10,
+    ingredients: [
+      { name: 'pipe', amount: 2 },
+      { name: 'steel-plate', amount: 1 },
+      { name: 'iron-gear-wheel', amount: 1 },
+    ],
+    results: [{ name: 'engine-unit', amount: 1 }],
+  },
+  {
+    id: 'electric-engine-unit',
+    name: 'Electric engine unit',
+    category: 'crafting-with-fluid',
+    allowProductivity: true,
+    time: 10,
+    ingredients: [
+      { name: 'electronic-circuit', amount: 2 },
+      { name: 'engine-unit', amount: 1 },
+      { name: 'lubricant', amount: 15, type: 'fluid' },
+    ],
+    results: [{ name: 'electric-engine-unit', amount: 1 }],
+  },
+  {
+    id: 'low-density-structure',
+    name: 'Low density structure',
+    category: 'crafting',
+    allowProductivity: true,
+    time: 15,
+    ingredients: [
+      { name: 'copper-plate', amount: 20 },
+      { name: 'steel-plate', amount: 2 },
+      { name: 'plastic-bar', amount: 5 },
+    ],
+    results: [{ name: 'low-density-structure', amount: 1 }],
+  },
+  {
+    id: 'flying-robot-frame',
+    name: 'Flying robot frame',
+    category: 'crafting',
+    allowProductivity: true,
+    time: 20,
+    ingredients: [
+      { name: 'electronic-circuit', amount: 3 },
+      { name: 'electric-engine-unit', amount: 1 },
+      { name: 'steel-plate', amount: 1 },
+      { name: 'battery', amount: 2 },
+    ],
+    results: [{ name: 'flying-robot-frame', amount: 1 }],
   },
 
   // Science packs
@@ -164,6 +243,67 @@ export const RECIPES = [
       { name: 'stone-wall', amount: 2 },
     ],
     results: [{ name: 'military-science-pack', amount: 2 }],
+  },
+  {
+    id: 'chemical-science-pack',
+    name: 'Chemical science pack',
+    category: 'crafting',
+    time: 24,
+    ingredients: [
+      { name: 'advanced-circuit', amount: 3 },
+      { name: 'engine-unit', amount: 2 },
+      { name: 'sulfur', amount: 1 },
+    ],
+    results: [{ name: 'chemical-science-pack', amount: 2 }],
+  },
+  {
+    id: 'production-science-pack',
+    name: 'Production science pack',
+    category: 'crafting',
+    time: 21,
+    ingredients: [
+      { name: 'rail', amount: 30 },
+      { name: 'electric-furnace', amount: 1 },
+      { name: 'productivity-module', amount: 1 },
+    ],
+    results: [{ name: 'production-science-pack', amount: 3 }],
+  },
+  {
+    id: 'utility-science-pack',
+    name: 'Utility science pack',
+    category: 'crafting',
+    time: 21,
+    ingredients: [
+      { name: 'low-density-structure', amount: 3 },
+      { name: 'processing-unit', amount: 2 },
+      { name: 'flying-robot-frame', amount: 1 },
+    ],
+    results: [{ name: 'utility-science-pack', amount: 3 }],
+  },
+
+  // Rail and modules
+  {
+    id: 'rail',
+    name: 'Rail',
+    category: 'crafting',
+    time: 0.5,
+    ingredients: [
+      { name: 'stone', amount: 1 },
+      { name: 'iron-stick', amount: 1 },
+      { name: 'steel-plate', amount: 1 },
+    ],
+    results: [{ name: 'rail', amount: 2 }],
+  },
+  {
+    id: 'productivity-module',
+    name: 'Productivity module',
+    category: 'electronics',
+    time: 15,
+    ingredients: [
+      { name: 'advanced-circuit', amount: 5 },
+      { name: 'electronic-circuit', amount: 5 },
+    ],
+    results: [{ name: 'productivity-module', amount: 1 }],
   },
 
   // Belts and belt routing

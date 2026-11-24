@@ -47,33 +47,42 @@ export function entitySize(entity) {
   return [1, 1];
 }
 
-export function machineGeometry(factory, compact = false) {
+export function machineGeometry(factory, compact = false, solidCount = 0) {
   const size = MACHINES[factory]?.size ?? 3;
   const right = size - 2;
   const isChemicalPlant = factory === "chemical-plant";
+  const fluidPipeOffset = isChemicalPlant ? -1 : 0;
+  const fluidPipeExit = right + 3;
+  const fluidPipeLane = right + 4;
+  let rowSpacing = size + (compact ? 0 : 1);
+  if (solidCount > 3) rowSpacing = size + 3;
   return {
     size,
     centerOffset: size % 2 === 0 ? 1 : 0.5,
-    lanes: [-3, -4, right + 3],
-    channels: compact ? [-3, -4, right + 3] : [-5, -8, right + 6],
+    lanes: [-3, -4, right + 3, 0],
+    channels: compact ? [-3, -4, right + 3, 0] : [-5, -8, right + 6, 0],
     outputInserter: right + 1,
     outputBelt: right + 2,
-    fluidPipeOffset: isChemicalPlant ? -1 : 0,
+    fluidPipeOffset,
+    fluidPipeOffsets: isChemicalPlant ? [-1, 1] : [0],
     fluidOutputOffset: isChemicalPlant ? 0 : 1,
-    fluidPipeExit: right + 3,
-    fluidPipeLane: right + 4,
+    fluidPipeExit,
+    fluidPipeExits: [fluidPipeExit, right + 5],
+    fluidPipeLane,
+    fluidPipeLanes: [fluidPipeLane, right + 6],
     poleGap: size - 1,
     poleRight: size - 1,
     poleRightGap: isChemicalPlant ? size - 2 : size - 1,
-    rowSpacing: size + (compact ? 0 : 1),
+    rowSpacing,
   };
 }
 
 // A column's rightmost lane: its output belt, third solid lane, or fluid pipe manifold.
 function rightExtent({ unit, geometry }) {
   const extents = [geometry.outputBelt];
-  if (solidIngredients(unit).length === 3) extents.push(geometry.lanes[2]);
-  if (fluidIngredients(unit).length > 0) extents.push(geometry.fluidPipeLane);
+  if (solidIngredients(unit).length >= 3) extents.push(geometry.lanes[2]);
+  const fluidCount = fluidIngredients(unit).length;
+  if (fluidCount > 0) extents.push(geometry.fluidPipeLanes[fluidCount - 1]);
   return Math.max(...extents);
 }
 
@@ -89,8 +98,9 @@ function buildColumns(units, compact, columnLimit) {
   const columns = [];
   for (const unit of units) {
     for (let remaining = unit.count; remaining > 0; remaining -= columnLimit) {
-      const geometry = machineGeometry(unit.factory, compact);
-      const usedLanes = geometry.lanes.slice(0, solidIngredients(unit).length);
+      const solids = solidIngredients(unit);
+      const geometry = machineGeometry(unit.factory, compact, solids.length);
+      const usedLanes = geometry.lanes.slice(0, solids.length);
       const leftLane = usedLanes.length ? Math.min(...usedLanes) : -2;
       columns.push({
         unit,
@@ -123,8 +133,8 @@ function buildBuses(plan, columns) {
     solidIngredients(column.unit).forEach((item, i) =>
       busFor.get(item.name).taps.push(column.x + column.geometry.channels[i]),
     );
-    fluidIngredients(column.unit).forEach((fluid) =>
-      busFor.get(fluid.name).taps.push(column.x + column.geometry.fluidPipeLane),
+    fluidIngredients(column.unit).forEach((fluid, i) =>
+      busFor.get(fluid.name).taps.push(column.x + column.geometry.fluidPipeLanes[i]),
     );
     busFor.get(column.unit.results[0].name).feeders.push(
       column.x + column.geometry.outputBelt,
@@ -140,7 +150,10 @@ function resolveHorizontalEdges(columns, buses, compact, fixedEdges) {
   const last = columns.at(-1);
   const rightOfLast = rightExtent(last);
   const leftEdge = compact
-    ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
+    ? Math.min(
+        ...buses.flatMap((bus) => bus.taps),
+        ...columns.map((column) => column.x - 2),
+      ) - 2
     : -12;
   const rightMargin = compact ? 2 : 8;
   return { leftEdge, rightEdge: last.x + rightOfLast + rightMargin };
@@ -190,12 +203,14 @@ function arrange(plan, compact, columnLimit, fixedEdges = null) {
   assignBusSpans(buses, plan, leftEdge, rightEdge);
   if (compact) packCompactBuses(buses);
   const bottom = Math.max(
-    ...columns.map(({ count, geometry }) => {
+    ...columns.map(({ unit, count, geometry }) => {
       const lastRow = (count - 1) * geometry.rowSpacing;
       const machineBottom = lastRow + geometry.size - 1;
-      const poleBottom = compact
-        ? Math.floor((count - 1) / 2) * 2 * geometry.rowSpacing + geometry.size
-        : lastRow + geometry.size;
+      const hasFourSolids = solidIngredients(unit).length > 3;
+      const poleBottom =
+        compact && !hasFourSolids
+          ? Math.floor((count - 1) / 2) * 2 * geometry.rowSpacing + geometry.size
+          : lastRow + geometry.size;
       return Math.max(machineBottom, poleBottom);
     }),
   );
@@ -471,15 +486,34 @@ function placeSolidLane(ctx, channel, lane, bend, endY) {
   for (let y = bend; y <= endY; y++) ctx.belt(lane, y, SOUTH);
 }
 
-function placeMachineRow(ctx, { x, unit }, geometry, index, rowConfig) {
-  const { solids, hasFluid, outputOffset } = rowConfig;
-  const y = index * geometry.rowSpacing;
-  ctx.add(unit.factory, x, y + ctx.yShift, machineOptions(unit, hasFluid));
-  if (hasFluid) {
-    const pipeY = y + geometry.fluidPipeOffset;
-    ctx.undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
-    ctx.undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
+function placeRowPoles(ctx, x, y, geometry, index, rowConfig) {
+  const { solids, fluids } = rowConfig;
+  if (solids[3]) {
+    ctx.pole(x - 1, y + 2);
+    return;
   }
+  if (!ctx.compact) {
+    ctx.pole(x, y + geometry.poleGap);
+    return;
+  }
+  if (index % 2 === 0) {
+    // Side poles cover two touching machine rows and their inserters.
+    ctx.pole(x - 2, y + geometry.poleGap);
+    const eastPoleX =
+      fluids.length > 1 ? x + geometry.fluidPipeExit : x + geometry.poleRight;
+    ctx.pole(eastPoleX, y + geometry.poleRightGap);
+  }
+}
+
+function placeMachineRow(ctx, { x, unit, count }, geometry, index, rowConfig) {
+  const { solids, fluids, outputOffset } = rowConfig;
+  const y = index * geometry.rowSpacing;
+  ctx.add(unit.factory, x, y + ctx.yShift, machineOptions(unit, fluids.length > 0));
+  fluids.forEach((_, fluidIndex) => {
+    const pipeY = y + geometry.fluidPipeOffsets[fluidIndex];
+    ctx.undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
+    ctx.undergroundPipe(x + geometry.fluidPipeExits[fluidIndex], pipeY, EAST);
+  });
   ctx.add(
     ctx.outputInserterName,
     x + geometry.outputInserter,
@@ -494,41 +528,47 @@ function placeMachineRow(ctx, { x, unit }, geometry, index, rowConfig) {
     ctx.add("long-handed-inserter", x + geometry.outputInserter, y + 1 + ctx.yShift, {
       direction: EAST,
     });
-  if (!ctx.compact) {
-    ctx.pole(x, y + geometry.poleGap);
-  } else if (index % 2 === 0) {
-    // Side poles cover two touching machine rows and their inserters.
-    ctx.pole(x - 2, y + geometry.poleGap);
-    ctx.pole(x + geometry.poleRight, y + geometry.poleRightGap);
+  if (solids[3]) {
+    ctx.add("fast-inserter", x, y + 2 + ctx.yShift, { direction: SOUTH });
+    ctx.underground(x, y + 3, SOUTH, "output");
+    if (index < count - 1) ctx.underground(x, y + 4, SOUTH, "input");
   }
+  placeRowPoles(ctx, x, y, geometry, index, rowConfig);
 }
 
 function placeColumn(ctx, column, isLast, sectionTag) {
   const { x, unit, count } = column;
-  const geometry = machineGeometry(unit.factory, ctx.compact);
   const solids = solidIngredients(unit);
-  const hasFluid = fluidIngredients(unit).length > 0;
+  const fluids = fluidIngredients(unit);
+  const geometry = machineGeometry(unit.factory, ctx.compact, solids.length);
+  const hasFluid = fluids.length > 0;
   const endY = (count - 1) * geometry.rowSpacing + 1;
   // Compact lanes connect directly to the bus; standard lanes fan out.
-  for (let i = 0; i < solids.length; i++) {
+  for (let i = 0; i < Math.min(solids.length, 3); i++) {
     const bend = ctx.compact || i !== 0 ? -2 : -3;
     placeSolidLane(ctx, x + geometry.channels[i], x + geometry.lanes[i], bend, endY);
+  }
+  if (solids.length > 3) {
+    if (!ctx.compact) ctx.belt(x, -3, SOUTH);
+    ctx.underground(x, -2, SOUTH, "input");
   }
   const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
   const outputEndY = (count - 1) * geometry.rowSpacing + outputOffset;
   for (let y = -2; y <= outputEndY; y++)
     ctx.belt(x + geometry.outputBelt, y, NORTH);
-  if (hasFluid) {
-    const fluidEndY = (count - 1) * geometry.rowSpacing + geometry.fluidPipeOffset;
+  fluids.forEach((_, fluidIndex) => {
+    const fluidEndY =
+      (count - 1) * geometry.rowSpacing + geometry.fluidPipeOffsets[fluidIndex];
     for (let y = -1; y <= fluidEndY; y++)
-      ctx.pipe(x + geometry.fluidPipeLane, y);
-  }
-  const rowConfig = { solids, hasFluid, outputOffset };
+      ctx.pipe(x + geometry.fluidPipeLanes[fluidIndex], y);
+  });
+  const rowConfig = { solids, fluids, outputOffset };
   for (let i = 0; i < count; i++) {
     placeMachineRow(ctx, column, geometry, i, rowConfig);
   }
   ctx.pole(x - 2, -2);
   ctx.pole(x + geometry.outputInserter, -2);
+  if (fluids.length > 1) ctx.pole(x + geometry.fluidPipeExits[1], -2);
   if (!ctx.compact && !isLast) ctx.pole(x + 10, -2);
   ctx.annotations.push({
     x: x + geometry.centerOffset - 0.5,
@@ -834,6 +874,7 @@ export function createLayout(
           top: Math.min(...firstArrangement.buses.map((bus) => bus.row)) - 3,
           right: firstArrangement.rightEdge + 2,
           bottom: Math.max(
+            extents.bottom + 2,
             ...firstArrangement.columns.map(
               (column) =>
                 (column.count - 1) * column.geometry.rowSpacing +

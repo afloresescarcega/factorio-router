@@ -25,12 +25,15 @@ const rotateOffset = ([px, py], direction) => {
 const isPipe = (entity) =>
   entity && (entity.name === "pipe" || entity.name === "pipe-to-ground");
 const PIPE_UNDERGROUND_REACH = 10;
-// Base Factorio 2.0.72 first input fluid-box connections (direction, local offset).
-const MACHINE_FLUID_INPUT = {
-  "assembling-machine-2": { direction: 0, position: [0, -1] },
-  "assembling-machine-3": { direction: 0, position: [0, -1] },
-  "chemical-plant": { direction: 0, position: [-1, -1] },
-  "electromagnetic-plant": { direction: 12, position: [-1.5, 0.5] },
+// Base Factorio 2.0.72 input fluid-box connections (direction, local offset).
+const MACHINE_FLUID_INPUTS = {
+  "assembling-machine-2": [{ direction: 0, position: [0, -1] }],
+  "assembling-machine-3": [{ direction: 0, position: [0, -1] }],
+  "chemical-plant": [
+    { direction: 0, position: [-1, -1] },
+    { direction: 0, position: [1, -1] },
+  ],
+  "electromagnetic-plant": [{ direction: 12, position: [-1.5, 0.5] }],
 };
 const key = (x, y) => `${x},${y}`;
 const build = (patch, options) =>
@@ -204,8 +207,10 @@ function inspect(layout) {
     } else {
       const data = RECIPES.find((r) => r.id === recipe);
       const solids = solidIngredients(data);
-      const index =
-        entity.position.x > machine.position.x ? 2 : reach === 2 ? 1 : 0;
+      let index;
+      if (entity.position.y > machine.position.y + 1) index = 3;
+      else if (entity.position.x > machine.position.x) index = 2;
+      else index = reach === 2 ? 1 : 0;
       requiredPickups.push({ section, item: solids[index].name, pickup });
     }
   }
@@ -287,23 +292,30 @@ function inspect(layout) {
     const recipe = RECIPES.find((r) => r.id === machine.recipe);
     const fluids = fluidIngredients(recipe);
     if (!fluids.length) continue;
-    const spec = MACHINE_FLUID_INPUT[machine.name];
-    expect(spec, `machine ${machine.name} has no fluid input box`).toBeDefined();
+    const specs = MACHINE_FLUID_INPUTS[machine.name];
+    expect(specs, `machine ${machine.name} has no fluid input boxes`).toBeDefined();
     const dir = machine.direction ?? 0;
-    const [rpx, rpy] = rotateOffset(spec.position, dir);
-    const portDir = (spec.direction + dir) % 16;
-    const [dx, dy] = vector[portDir];
-    const pipeTile = tiles.get(
-      key(machine.position.x + rpx + dx, machine.position.y + rpy + dy),
-    );
-    expect(
-      isPipe(pipeTile) && aboveGroundDirs(pipeTile).includes(opposite(portDir)),
-      `missing connected pipe for ${machine.name} (${machine.recipe}) at ${machine.position.x},${machine.position.y}`,
-    ).toBe(true);
-    requiredFluidPorts.push({
-      section: sectionOfY(machine.position.y),
-      fluid: fluids[0].name,
-      pipe: pipeTile,
+    fluids.forEach((fluid, fluidIndex) => {
+      const spec = specs[fluidIndex];
+      expect(
+        spec,
+        `machine ${machine.name} has no fluid input box ${fluidIndex}`,
+      ).toBeDefined();
+      const [rpx, rpy] = rotateOffset(spec.position, dir);
+      const portDir = (spec.direction + dir) % 16;
+      const [dx, dy] = vector[portDir];
+      const pipeTile = tiles.get(
+        key(machine.position.x + rpx + dx, machine.position.y + rpy + dy),
+      );
+      expect(
+        isPipe(pipeTile) && aboveGroundDirs(pipeTile).includes(opposite(portDir)),
+        `missing connected pipe for ${machine.name} (${machine.recipe}, ${fluid.name}) at ${machine.position.x},${machine.position.y}`,
+      ).toBe(true);
+      requiredFluidPorts.push({
+        section: sectionOfY(machine.position.y),
+        fluid: fluid.name,
+        pipe: pipeTile,
+      });
     });
   }
   const pipeReachable = (start) => {
@@ -944,6 +956,70 @@ test.each(["standard", "compact"])(
       const encoded = encodeBlueprint(layout.blueprint);
       expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
       expect(decodeBlueprint(encoded)).toEqual(layout.blueprint);
+    }
+  },
+);
+
+test.each(["standard", "compact"])(
+  "%s all six vanilla science packs isolate all four fluids and four-ingredient robot frames",
+  (layoutMode) => {
+    const layout = build({
+      layoutMode,
+      assembler: "assembling-machine-3",
+      belt: "express-transport-belt",
+      fromOre: layoutMode === "compact",
+      maxMachines: 400,
+      outputs: [
+        { recipe: "automation-science-pack", rate: 15 },
+        { recipe: "logistic-science-pack", rate: 15 },
+        { recipe: "military-science-pack", rate: 15 },
+        { recipe: "chemical-science-pack", rate: 15 },
+        { recipe: "production-science-pack", rate: 15 },
+        { recipe: "utility-science-pack", rate: 15 },
+      ],
+    });
+    const fluidInputs = new Set(
+      layout.annotations
+        .filter((a) => a.kind === "input" && a.fluid)
+        .map((a) => a.item),
+    );
+    expect(fluidInputs).toEqual(
+      new Set(["water", "petroleum-gas", "sulfuric-acid", "lubricant"]),
+    );
+    inspect(layout);
+    const encoded = encodeBlueprint(layout.blueprint);
+    expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
+    expect(decodeBlueprint(encoded)).toEqual(layout.blueprint);
+  },
+);
+
+test.each(["standard", "compact"])(
+  "%s wrapped two-fluid sulfur and four-solid flying-robot-frame columns connect cleanly on yellow belts",
+  (layoutMode) => {
+    for (const scenario of [
+      {
+        outputs: [{ recipe: "sulfur", rate: 60 }],
+        machineOverrides: { sulfur: { count: 16 } },
+      },
+      {
+        outputs: [{ recipe: "flying-robot-frame", rate: 10 }],
+        intermediates: false,
+        machineOverrides: { "flying-robot-frame": { count: 16 } },
+      },
+      {
+        outputs: [
+          { recipe: "sulfur", rate: 30 },
+          { recipe: "battery", rate: 15 },
+          { recipe: "flying-robot-frame", rate: 5 },
+        ],
+        belt: "fast-transport-belt",
+      },
+    ]) {
+      const layout = build({ ...scenario, layoutMode });
+      inspect(layout);
+      expect(
+        validateBlueprintString(encodeBlueprint(layout.blueprint)),
+      ).toEqual({ ok: true, errors: [] });
     }
   },
 );

@@ -202,3 +202,25 @@ test("Helmod imports plastic bars on chemical plants and rejects assemblers", ()
   expect(blueprint.entities.filter((e) => e.name === "chemical-plant")).toHaveLength(2);
   expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
 });
+
+test("Helmod imports sulfur, flying robot frames, and late-game science packs", () => {
+  const sulfurEncoded = encode([["sulfur", "chemical-plant", 1]]);
+  const sulfurPlan = planHelmodString(sulfurEncoded);
+  expect(sulfurPlan.outputs).toEqual([{ name: "sulfur", rate: 90 }]);
+  expect(sulfurPlan.inputs).toEqual([
+    { name: "water", rate: 1350, type: "fluid" },
+    { name: "petroleum-gas", rate: 1350, type: "fluid" },
+  ]);
+  expect(decodeBlueprint(processHelmodString(sulfurEncoded)).blueprint.entities.some((e) => e.recipe === "sulfur")).toBe(true);
+
+  const frameEncoded = encode([["flying-robot-frame", "assembling-machine-2", 2]]);
+  const framePlan = planHelmodString(frameEncoded);
+  expect(framePlan.outputs).toEqual([{ name: "flying-robot-frame", rate: 4.5 }]);
+  expect(decodeBlueprint(processHelmodString(frameEncoded)).blueprint.entities.filter((e) => e.recipe === "flying-robot-frame")).toHaveLength(2);
+
+  for (const science of ["chemical-science-pack", "production-science-pack", "utility-science-pack"]) {
+    const encoded = encode([[science, "assembling-machine-2", 2]]);
+    const blueprint = decodeBlueprint(processHelmodString(encoded)).blueprint;
+    expect(blueprint.entities.filter((e) => e.recipe === science)).toHaveLength(2);
+  }
+});

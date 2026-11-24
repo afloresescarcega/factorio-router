@@ -424,3 +424,103 @@ test("builds plastic bars in chemical plants as an intermediate and supports ext
     }).issues.join(" "),
   ).toMatch(/Petroleum gas needs 600\/min, but only 400\/min is available/);
 });
+
+test("plans chemical, production, and utility science packs with all buildable intermediates", () => {
+  const allScience = plan({
+    outputs: [
+      { recipe: "automation-science-pack", rate: 30 },
+      { recipe: "logistic-science-pack", rate: 30 },
+      { recipe: "military-science-pack", rate: 30 },
+      { recipe: "chemical-science-pack", rate: 30 },
+      { recipe: "production-science-pack", rate: 30 },
+      { recipe: "utility-science-pack", rate: 30 },
+    ],
+    assembler: "assembling-machine-3",
+    belt: "express-transport-belt",
+    fromOre: true,
+    maxMachines: 500,
+  });
+  expect(allScience.issues).toEqual([]);
+  const unitNames = new Set(allScience.units.map((unit) => unit.recipe));
+  for (const expected of [
+    "chemical-science-pack",
+    "production-science-pack",
+    "utility-science-pack",
+    "engine-unit",
+    "electric-engine-unit",
+    "sulfur",
+    "battery",
+    "rail",
+    "productivity-module",
+    "low-density-structure",
+    "flying-robot-frame",
+  ]) {
+    expect(unitNames.has(expected), expected).toBe(true);
+  }
+  const inputMap = Object.fromEntries(
+    allScience.inputs.map((input) => [input.name, input]),
+  );
+  expect(Object.keys(inputMap).sort()).toEqual([
+    "coal",
+    "copper-ore",
+    "iron-ore",
+    "lubricant",
+    "petroleum-gas",
+    "stone",
+    "sulfuric-acid",
+    "water",
+  ]);
+  for (const fluid of ["lubricant", "petroleum-gas", "sulfuric-acid", "water"]) {
+    expect(inputMap[fluid].type).toBe("fluid");
+  }
+  // Conservation check across the entire 6-science dependency DAG.
+  const balance = new Map(allScience.inputs.map((item) => [item.name, item.rate]));
+  for (const unit of allScience.units) {
+    const recipe = recipeById[unit.recipe];
+    for (const item of recipe.ingredients)
+      balance.set(item.name, (balance.get(item.name) || 0) - item.amount * unit.crafts);
+    for (const item of recipe.results)
+      balance.set(item.name, (balance.get(item.name) || 0) + item.amount * unit.crafts);
+  }
+  for (const item of allScience.outputs)
+    balance.set(item.name, balance.get(item.name) - item.rate);
+  for (const amount of balance.values()) expect(amount).toBeCloseTo(0, 8);
+});
+
+test("sizes sulfur, battery, electric engine unit, productivity module, and flying robot frame correctly", () => {
+  // Sulfur uses a chemical plant with two fluid inputs (water + petroleum-gas) and zero solids.
+  const sulfurPlan = plan({ outputs: [{ recipe: "sulfur", rate: 60 }] });
+  expect(sulfurPlan.issues).toEqual([]);
+  expect(sulfurPlan.units[0].factory).toBe("chemical-plant");
+  expect(sulfurPlan.units[0].count).toBe(1);
+  expect(sulfurPlan.inputs).toEqual([
+    { name: "water", rate: 900, type: "fluid" },
+    { name: "petroleum-gas", rate: 900, type: "fluid" },
+  ]);
+
+  // Electric engine unit requires assembling machine 2 or higher for lubricant.
+  expect(
+    factoryFor(recipeById["electric-engine-unit"], {
+      ...DEFAULT_CONFIG,
+      assembler: "assembling-machine-1",
+    }),
+  ).toBe("assembling-machine-2");
+  expect(canCraft("assembling-machine-1", recipeById["electric-engine-unit"])).toBe(false);
+  expect(canCraft("assembling-machine-2", recipeById["electric-engine-unit"])).toBe(true);
+
+  // Productivity module is in the electronics category (craftable in EM plant) with NO productivity bonus.
+  expect(canCraft("electromagnetic-plant", recipeById["productivity-module"])).toBe(true);
+  expect(productivityFor(recipeById["productivity-module"], "electromagnetic-plant")).toBe(0);
+  const modPlan = plan({
+    spaceAge: true,
+    electronicsMachine: "electromagnetic-plant",
+    outputs: [{ recipe: "productivity-module", rate: 8 }],
+    intermediates: false,
+  });
+  expect(modPlan.units[0].factory).toBe("electromagnetic-plant");
+  expect(modPlan.units[0].crafts).toBe(8);
+  expect(modPlan.units[0].count).toBe(1);
+
+  // Flying robot frame uses 4 solid ingredients (slots 0 & 3 fast inserters, 1 & 2 long-handed).
+  expect(craftingCapacity(recipeById["flying-robot-frame"], "assembling-machine-3")).toBe(3.75);
+});

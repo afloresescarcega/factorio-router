@@ -84,7 +84,7 @@ export function craftingCapacity(recipe, factory, outputStackSize = 1) {
     (90 * outputStackSize) /
       (recipe.results[0].amount * (1 + productivityFor(recipe, factory))),
     ...solidIngredients(recipe).map(
-      (ingredient, index) => (index === 0 ? 90 : 45) / ingredient.amount,
+      (ingredient, index) => (index === 0 || index === 3 ? 90 : 45) / ingredient.amount,
     ),
   );
 }
@@ -134,6 +134,19 @@ export function splitCount(total, sections) {
   return Array.from({ length: sections }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
+function countDependencies(unit, producers, cache, seen = new Set()) {
+  if (cache.has(unit)) return cache.get(unit);
+  if (seen.has(unit)) return 0;
+  const next = new Set(seen).add(unit);
+  let total = 0;
+  for (const ingredient of unit.ingredients) {
+    const producer = producers.get(ingredient.name);
+    if (producer) total += 1 + countDependencies(producer, producers, cache, next);
+  }
+  cache.set(unit, total);
+  return total;
+}
+
 function orderedUnits(units) {
   const producers = new Map(units.map((unit) => [unit.results[0].name, unit]));
   if (producers.size !== units.length)
@@ -152,7 +165,19 @@ function orderedUnits(units) {
     visited.add(unit);
     ordered.push(unit);
   }
-  units.forEach(visit);
+  // Place fluid-consuming branches first (shallowest dependencies first) so
+  // piped runs stay close to the west entrances and within Factorio 2.0's
+  // 320-tile pipeline extent limit.
+  const depCache = new Map();
+  const fluidUnits = units
+    .filter((unit) => fluidIngredients(unit).length > 0)
+    .sort(
+      (a, b) =>
+        countDependencies(a, producers, depCache) -
+        countDependencies(b, producers, depCache),
+    );
+  const solidUnits = units.filter((unit) => fluidIngredients(unit).length === 0);
+  [...fluidUnits, ...solidUnits].forEach(visit);
   return ordered;
 }
 
