@@ -1,7 +1,7 @@
 import React, { memo, useState } from "react";
 import { entitySize } from "./layout.js";
 import { MACHINES } from "./recipeCatalog.js";
-import { title } from "./planner.js";
+import { formatRate, title } from "./planner.js";
 
 const COLORS = {
   machine: "#6ba0a0",
@@ -135,7 +135,14 @@ const Entity = memo(function Entity({ entity }) {
 
 function BlueprintPreview({ layout }) {
   const [zoom, setZoom] = useState(1);
-  const { bounds, blueprint, annotations, footprint } = layout;
+  const {
+    bounds,
+    blueprint,
+    annotations,
+    footprint,
+    sections = 1,
+    sectionBounds = [],
+  } = layout;
   const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
   const hasElectromagneticPlant = blueprint.blueprint.entities.some((entity) => entity.name === "electromagnetic-plant");
   const hasChemicalPlant = blueprint.blueprint.entities.some((entity) => entity.name === "chemical-plant");
@@ -157,7 +164,9 @@ function BlueprintPreview({ layout }) {
         <span>
           Entity view{" "}
           <span className="muted">
-            · {footprint.width} × {footprint.height} tiles
+            {sections > 1
+              ? `· ${sections} parallel sections · ${footprint.width} × ${footprint.height} tiles`
+              : `· ${footprint.width} × ${footprint.height} tiles`}
           </span>
         </span>
         <div className="zoom-controls">
@@ -229,6 +238,37 @@ function BlueprintPreview({ layout }) {
               opacity=".7"
             />
           ))}
+          {sections > 1 &&
+            sectionBounds.map((band, index) => {
+              const next = sectionBounds[index + 1];
+              const dividerY = next ? (band.bottom + next.top) / 2 : null;
+              return (
+                <g key={`section-${band.section}`}>
+                  <text
+                    x={bounds.left + width / 2}
+                    y={band.top - 0.7}
+                    textAnchor="middle"
+                    fill="#bdb5ab"
+                    fontSize=".85"
+                    opacity=".85"
+                  >
+                    Section {band.section}
+                  </text>
+                  {dividerY !== null && (
+                    <line
+                      x1={bounds.left + 0.5}
+                      y1={dividerY}
+                      x2={bounds.right + 0.5}
+                      y2={dividerY}
+                      stroke="#6f6b69"
+                      strokeDasharray="0.6 0.6"
+                      strokeWidth=".12"
+                      opacity=".6"
+                    />
+                  )}
+                </g>
+              );
+            })}
           {blueprint.blueprint.entities.map((entity) => (
             <Entity key={entity.entity_number} entity={entity} />
           ))}
@@ -237,7 +277,7 @@ function BlueprintPreview({ layout }) {
             .map((a) => {
               const stroke = annotationColor(a);
               return (
-                <g key={`${a.kind}-${a.item}`}>
+                <g key={`${a.kind}-${a.item}-${a.x}-${a.y}`}>
                   <circle
                     cx={a.x + 0.5}
                     cy={a.y + 0.5}
@@ -247,8 +287,9 @@ function BlueprintPreview({ layout }) {
                     strokeWidth=".16"
                   />
                   <title>
-                    {a.kind}: {title(a.item)}
-                    {a.fluid ? " (pipe)" : ""}
+                    {a.kind}
+                    {a.section ? ` (section ${a.section})` : ""}: {title(a.item)}
+                    {a.fluid ? " (pipe)" : ""} · {formatRate(a.rate)}/min
                   </title>
                   <text
                     x={a.x + 0.5}
@@ -259,6 +300,7 @@ function BlueprintPreview({ layout }) {
                   >
                     {title(a.item)}
                     {a.fluid ? " (pipe)" : ""}
+                    {a.section ? ` #${a.section}` : ""}
                   </text>
                 </g>
               );
@@ -288,9 +330,9 @@ function BlueprintPreview({ layout }) {
         </span>
       </div>
       <p className="preview-note">
-        Inputs enter on the left. Outputs leave on the right. Hover an entity
-        for details; zoom and scroll to inspect. The preview and export use the
-        same entities.
+        {sections > 1
+          ? `Each of the ${sections} parallel sections takes inputs on the left and outputs on the right, wired into one power grid. Hover an entity for details; zoom and scroll to inspect. The preview and export use the same entities.`
+          : "Inputs enter on the left. Outputs leave on the right. Hover an entity for details; zoom and scroll to inspect. The preview and export use the same entities."}
       </p>
     </>
   );

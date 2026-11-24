@@ -133,22 +133,56 @@ test("output order does not affect shared producers when auto-expansion is disab
   expect(rate(a.inputs, "copper-plate")).toBe(120);
 });
 
-test("blocks export for supply, belt, and machine constraints", () => {
+test("blocks export for supply and machine constraints, and auto-batches saturated belt lanes", () => {
   for (const patch of [
     { inputLimits: { "iron-plate": 0 } },
     { maxMachines: 1 },
-    { outputs: [{ recipe: "electronic-circuit", rate: 300 }] },
   ]) {
     const result = plan(patch);
     expect(result.issues.length).toBeGreaterThan(0);
     expect(() => createLayout(result)).toThrow();
   }
+  const batched = plan({
+    outputs: [{ recipe: "electronic-circuit", rate: 300 }],
+  });
+  expect(batched.issues).toEqual([]);
+  expect(batched.sections).toBe(2);
+  expect(batched.bottlenecks.map((entry) => entry.name)).toEqual([
+    "copper-cable",
+  ]);
+  expect(createLayout(batched).sections).toBe(2);
+
+  const single = plan({
+    outputs: [{ recipe: "electronic-circuit", rate: 300 }],
+    belt: "express-transport-belt",
+  });
+  expect(single.issues).toEqual([]);
+  expect(single.sections).toBe(1);
+});
+
+test("auto-batches the saturated circuit-from-ore red belt scenario into 2 parallel sections", () => {
+  const result = plan({
+    outputs: [{ recipe: "electronic-circuit", rate: 7 }],
+    rateUnit: "items/s",
+    belt: "fast-transport-belt",
+    fromOre: true,
+    layoutMode: "compact",
+  });
+  expect(result.issues).toEqual([]);
+  expect(result.sections).toBe(2);
+  expect(result.bottlenecks[0].name).toBe("copper-cable");
+  expect(result.machineCount).toBe(72);
   expect(
-    plan({
-      outputs: [{ recipe: "electronic-circuit", rate: 300 }],
-      belt: "express-transport-belt",
-    }).issues,
-  ).toEqual([]);
+    Object.fromEntries(result.units.map((u) => [u.recipe, u.sectionCounts])),
+  ).toEqual({
+    "iron-plate": [6, 6],
+    "copper-plate": [9, 9],
+    "copper-cable": [7, 7],
+    "electronic-circuit": [14, 14],
+  });
+  for (const entry of result.transport) {
+    expect(entry.perSectionRate).toBeLessThanOrEqual(entry.laneCapacity);
+  }
 });
 
 test("machine overrides use their own crafting speed and remain editable when invalid", () => {
@@ -249,6 +283,8 @@ test("plans processing units with sulfuric-acid fluid supply and compatible mach
     rate: 75,
     type: "fluid",
     pipeCapacity: 72000,
+    lanes: 1,
+    perSectionRate: 75,
   });
   expect(result.warnings.join(" ")).toMatch(/supplied by pipe/);
 
@@ -299,6 +335,16 @@ test("plans processing units with sulfuric-acid fluid supply and compatible mach
     DEFAULT_CONFIG,
   );
   expect(overPipe.issues.join(" ")).toMatch(/72,000\/min per pipe/);
+
+  const splitPipe = finishPlan(
+    [{ recipe: "processing-unit", factory: "assembling-machine-2", count: 2, crafts: 2 }],
+    [{ name: "sulfuric-acid", rate: 72001, type: "fluid" }],
+    [{ name: "processing-unit", rate: 2 }],
+    DEFAULT_CONFIG,
+  );
+  expect(splitPipe.issues).toEqual([]);
+  expect(splitPipe.sections).toBe(2);
+  expect(splitPipe.bottlenecks[0].name).toBe("sulfuric-acid");
 });
 
 test("builds plastic bars in chemical plants as an intermediate and supports external override", () => {

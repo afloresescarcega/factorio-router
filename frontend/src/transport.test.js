@@ -1,6 +1,6 @@
 import { RECIPES, solidIngredients } from "./recipeCatalog.js";
-import { DEFAULT_CONFIG, MAX_OUTPUTS, craftingCapacity, formatRate, planProduction, recipeById } from "./planner.js";
-import { BELTS, RATE_UNITS, convertRateUnit, fluidRateScale, rateScale, transportSettings } from "./transport.js";
+import { DEFAULT_CONFIG, MAX_MACHINES, MAX_OUTPUTS, craftingCapacity, formatRate, planProduction, recipeById } from "./planner.js";
+import { BELTS, RATE_UNITS, convertRateUnit, fluidRateScale, rateScale, requiredLanes, transportSettings } from "./transport.js";
 import { createLayout } from "./layout.js";
 
 const plan = (patch) => planProduction({ ...DEFAULT_CONFIG, ...patch });
@@ -17,9 +17,14 @@ test("small belt fractions remain visible instead of rounding to zero", () => {
   expect(formatRate(7200)).toBe("7,200");
 });
 
-test("floating-point tolerances do not accept zero supply or a deliberate tiny overload", () => {
+test("floating-point tolerances do not accept zero supply or miss a deliberate tiny lane split", () => {
   expect(plan({ outputs: outputs("copper-cable", 1e-8), inputLimits: { "copper-plate": 0 } }).issues.join()).toMatch(/only 0\/min/);
-  expect(plan({ outputs: outputs("copper-cable", 450 + 1e-7) }).issues.join()).toMatch(/one lane/);
+  expect(requiredLanes(450, 450)).toBe(1);
+  expect(requiredLanes(900 + 1e-13, 450)).toBe(2);
+  expect(plan({ outputs: outputs("copper-cable", 450) }).sections).toBe(1);
+  const split = plan({ outputs: outputs("copper-cable", 450 + 1e-7) });
+  expect(split.issues).toEqual([]);
+  expect(split.sections).toBe(2);
 });
 
 test("Space Age defaults off and gates turbo belts and belt stacking with actionable errors", () => {
@@ -38,7 +43,7 @@ test("stack changes recalculate automatic counts and still reject insufficient m
   expect(plan({ ...config, inputStackSize: 4 }).units[0].count).toBe(8);
 });
 
-test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both independent lane limits", (belt) => {
+test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both independent lane limits and auto-splits above them", (belt) => {
   for (let inputStackSize = 1; inputStackSize <= 4; inputStackSize++) {
     for (let outputStackSize = 1; outputStackSize <= 4; outputStackSize++) {
       for (const rateUnit of RATE_UNITS) {
@@ -48,11 +53,15 @@ test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both indep
         const config = { spaceAge: true, belt, inputStackSize, outputStackSize, rateUnit, outputs: outputs("copper-cable", maximum / scale) };
         const valid = plan(config);
         expect(valid.issues, JSON.stringify(config)).toEqual([]);
+        expect(valid.sections).toBe(1);
         expect(valid.outputs[0].rate).toBeCloseTo(maximum, 7);
         expect(valid.inputs[0].rate).toBeCloseTo(maximum / 2, 7);
-        const invalid = plan({ ...config, outputs: outputs("copper-cable", (maximum + 0.01) / scale) });
-        expect(invalid.issues.join(" ")).toMatch(/one lane/);
-        expect(() => createLayout(invalid)).toThrow();
+        const batched = plan({ ...config, outputs: outputs("copper-cable", (maximum + 0.01) / scale) });
+        expect(batched.issues, JSON.stringify(config)).toEqual([]);
+        expect(batched.sections).toBe(2);
+        for (const entry of batched.transport) {
+          expect(entry.perSectionRate).toBeLessThanOrEqual(entry.laneCapacity);
+        }
       }
     }
   }
@@ -60,16 +69,24 @@ test.each(Object.keys(BELTS))("%s: every stack pairing and unit obeys both indep
 
 test("stacked inputs do not grant stacked capacity to intermediate producers", () => {
   const config = { spaceAge: true, inputStackSize: 4, outputs: outputs("electronic-circuit", 200) };
-  const invalid = plan(config);
-  expect(invalid.issues.join()).toMatch(/Copper cable needs 600\/min/);
-  expect(plan({ ...config, outputStackSize: 2 }).issues).toEqual([]);
+  const batched = plan(config);
+  expect(batched.issues).toEqual([]);
+  expect(batched.sections).toBe(2);
+  expect(batched.bottlenecks[0].name).toBe("copper-cable");
+  const stacked = plan({ ...config, outputStackSize: 2 });
+  expect(stacked.issues).toEqual([]);
+  expect(stacked.sections).toBe(1);
   const supplied = plan({ ...config, externalItems: ["copper-cable"] });
   expect(supplied.issues).toEqual([]);
+  expect(supplied.sections).toBe(1);
   expect(supplied.transport.find((item) => item.name === "copper-cable").stackSize).toBe(4);
 });
 
 test("stacked outputs do not increase external supply capacity or input inserter speed", () => {
-  expect(plan({ spaceAge: true, outputStackSize: 4, outputs: outputs("iron-gear-wheel", 300) }).issues.join()).toMatch(/Iron plate needs 600\/min/);
+  const batched = plan({ spaceAge: true, outputStackSize: 4, outputs: outputs("iron-gear-wheel", 300) });
+  expect(batched.issues).toEqual([]);
+  expect(batched.sections).toBe(2);
+  expect(batched.bottlenecks[0].name).toBe("iron-plate");
   for (const recipe of RECIPES) {
     const factory =
       recipe.category === "smelting"
@@ -85,10 +102,17 @@ test("stacked outputs do not increase external supply capacity or input inserter
 
 test("requested surplus and intermediate consumption share the same capacity budget", () => {
   const config = { spaceAge: true, outputStackSize: 2, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 300)] };
-  expect(plan(config).issues).toEqual([]);
-  expect(plan({ ...config, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 301)] }).issues.join()).toMatch(/Copper cable needs 901/);
+  const single = plan(config);
+  expect(single.issues).toEqual([]);
+  expect(single.sections).toBe(1);
+  const splitSurplus = plan({ ...config, outputs: [...outputs("electronic-circuit", 200), ...outputs("copper-cable", 301)] });
+  expect(splitSurplus.issues).toEqual([]);
+  expect(splitSurplus.sections).toBe(2);
+  expect(splitSurplus.bottlenecks[0].name).toBe("copper-cable");
   // Duplicate rows are merged before checking throughput.
-  expect(plan({ outputs: [...outputs("copper-cable", 225), ...outputs("copper-cable", 226)] }).issues.join()).toMatch(/Copper cable needs 451/);
+  const splitMerged = plan({ outputs: [...outputs("copper-cable", 225), ...outputs("copper-cable", 226)] });
+  expect(splitMerged.issues).toEqual([]);
+  expect(splitMerged.sections).toBe(2);
 });
 
 test.each(RATE_UNITS)("%s supply limits use the input stack height, not the output height", (rateUnit) => {
@@ -121,7 +145,10 @@ test("belt multiples follow belt/stack choices, while item rates remain fixed", 
   expect(plan(config).outputs[0].rate).toBe(225);
   expect(plan({ ...config, spaceAge: true, belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(3600);
   expect(plan({ ...config, spaceAge: true, rateUnit: "items/s", belt: "turbo-transport-belt", outputStackSize: 4 }).outputs[0].rate).toBe(15);
-  expect(plan({ ...config, outputs: outputs("copper-cable", 2) }).issues.join()).toMatch(/parallel belts are not generated/);
+  const twoBelts = plan({ ...config, outputs: outputs("copper-cable", 2) });
+  expect(twoBelts.issues).toEqual([]);
+  expect(twoBelts.sections).toBe(4);
+  expect(createLayout(twoBelts).sections).toBe(4);
 });
 
 test.each([0, -1, 1.5, 5, Infinity, NaN, "", " ", "bad", null, true, [], {}])("rejects invalid stack height %j at both boundaries", (value) => {
@@ -160,7 +187,7 @@ test("all catalog outputs conserve materials and retain machine and target-count
   for (const amount of balance.values()) expect(amount).toBeCloseTo(0, 8);
   expect(plan({ ...config, maxMachines: 44 }).issues.join()).toMatch(/budget/);
   expect(() => plan({ ...config, outputs: [...config.outputs, config.outputs[0]] })).toThrow(/output targets/);
-  expect(plan({ ...config, maxMachines: 201 }).issues.join()).toMatch(/between 1 and 200/);
+  expect(plan({ ...config, maxMachines: MAX_MACHINES + 1 }).issues.join()).toMatch(new RegExp(`between 1 and ${MAX_MACHINES}`));
   expect(plan({ ...config, machineOverrides: { "copper-cable": { count: 200 } } }).issues.join()).toMatch(/budget/);
   expect(() => transportSettings({ belt: "__proto__" })).toThrow(/supported belt/);
   expect(() => fluidRateScale("items/hour")).toThrow(/rate units/);

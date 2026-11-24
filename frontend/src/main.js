@@ -3,6 +3,7 @@ import { HelmodFactory } from "./helmodFactory.js";
 import { encodeBlueprint } from "./blueprintFactory.js";
 import { MACHINES } from "./recipeCatalog.js";
 import {
+  MAX_MACHINES,
   validateUnit,
   finishPlan,
   recipeById,
@@ -74,9 +75,9 @@ export function planHelmodString(helmodString, config = {}) {
     if (!node || typeof node !== "object") return;
     if (node.type === "recipe" && node.name && node.factory?.name) {
       const rawCount = Number(node.factory.count);
-      if (!Number.isFinite(rawCount) || rawCount <= 0 || rawCount > 200)
+      if (!Number.isFinite(rawCount) || rawCount <= 0 || rawCount > MAX_MACHINES)
         throw new Error(
-          `Invalid machine count for ${node.name}. Use a finite count greater than 0 and at most 200.`,
+          `Invalid machine count for ${node.name}. Use a finite count greater than 0 and at most ${MAX_MACHINES}.`,
         );
       const unit = validateUnit(
         {

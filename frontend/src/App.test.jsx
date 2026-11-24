@@ -191,7 +191,7 @@ test("rate units convert targets and supply together without changing the bluepr
   expect(showExport().value).toBe(original);
   fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "belts" } });
   expect(screen.getByLabelText("Output rate 1").valueAsNumber).toBeCloseTo(1 / 15, 10);
-  expect(screen.getByText(/Enter a fraction or multiple/)).toHaveTextContent("at most 0.5 belts");
+  expect(screen.getByText(/Enter a fraction or multiple/)).toHaveTextContent("automatically split into parallel sections");
   expect(showExport().value).toBe(original);
   fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/min" } });
   expect(screen.getByLabelText("Output rate 1")).toHaveValue(60);
@@ -214,17 +214,19 @@ test("green belts and independent stacking generate real entities and recover sa
   expect(exported.entities.filter((entity) => entity.name === "stack-inserter").every((entity) => entity.override_stack_size === 4)).toBe(true);
   expect(screen.getByText(/120 items\/s · 7,200 items\/min/)).toHaveTextContent("100% of output lane");
   fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "0.501" } });
-  expect(screen.getByRole("alert")).toHaveTextContent("one lane");
-  expect(screen.queryByLabelText("Import this string in Factorio")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  expect(screen.getByRole("note")).toHaveTextContent("Auto-batched into 2 parallel sections");
+  expect(screen.getByLabelText("Import this string in Factorio")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
   fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "0.5" } });
+  expect(screen.queryByRole("note")).not.toBeInTheDocument();
   expect(showExport().value).toBeTruthy();
-  // Output stacks are still 4 high, but the external input can no longer carry the demand.
+  // Output stacks are still 4 high, so reducing input stacks splits into 2 sections for copper plate input.
   fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "1" } });
-  expect(screen.getByRole("alert")).toHaveTextContent("Copper plate needs 3,600/min");
-  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  expect(screen.getByRole("note")).toHaveTextContent("Copper plate needs 3,600/min");
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
   fireEvent.change(screen.getByLabelText("Input stacks"), { target: { value: "2" } });
+  expect(screen.queryByRole("note")).not.toBeInTheDocument();
   expect(showExport().value).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Reset example" }));
   expect(screen.getByLabelText("Belts")).toHaveValue("transport-belt");
@@ -375,11 +377,36 @@ test("a supply limit below demand is flagged on its own field", () => {
   expect(screen.getByLabelText("Copper plate supply limit")).not.toHaveAttribute("aria-invalid");
 });
 
-test("output feedback uses singular units and names an over-capacity lane", () => {
+test("output feedback uses singular units and shows multi-lane auto-split without blocking export", () => {
   render(<App />);
   expect(screen.getByText(/^1 item\/s · 60 items\/min/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "1000" } });
-  expect(screen.getByText(/over lane capacity/)).toBeInTheDocument();
+  expect(screen.getByText(/3 output lanes/)).toBeInTheDocument();
+  expect(screen.getByRole("note")).toHaveTextContent("Auto-batched into 7 parallel sections");
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+});
+
+test("saturated intermediate lines auto-batch into parallel sections and collapse back when upgrading belts", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Rate units"), { target: { value: "items/s" } });
+  fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "7" } });
+  fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "fast-transport-belt" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Include electric smelting from ore" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Compact layout" }));
+
+  expect(screen.getByRole("note")).toHaveTextContent("Auto-batched into 2 parallel sections");
+  expect(screen.getByRole("note")).toHaveTextContent("Copper cable needs 1,260/min");
+  expect(screen.getByText(/Needs 7 \/ sec · 2 lanes of 3.5/)).toBeInTheDocument();
+  expect(screen.getByText(/Needs 10.5 \/ sec · 2 lanes of 5.25/)).toBeInTheDocument();
+  expect(screen.getByText("Section 1")).toBeInTheDocument();
+  expect(screen.getByText("Section 2")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+  const blueprint = decodeBlueprint(showExport().value).blueprint;
+  expect(blueprint.label).toContain("(2×)");
+
+  fireEvent.change(screen.getByLabelText("Belts"), { target: { value: "express-transport-belt" } });
+  expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  expect(decodeBlueprint(showExport().value).blueprint.label).not.toContain("(2×)");
 });
 
 test("processing units show piped sulfuric acid, pipe legend, and export valid pipe entities", () => {

@@ -59,9 +59,21 @@ test("rejects unknown recipes, incompatible machines, and unbounded counts", () 
   ).toThrow(/Invalid machine count/);
   expect(() =>
     planHelmodString(
-      encode([["iron-gear-wheel", "assembling-machine-1", 201]]),
+      encode([["iron-gear-wheel", "assembling-machine-1", 1001]]),
     ),
   ).toThrow(/Invalid machine count/);
+});
+
+test("Helmod imports that exceed a single belt lane auto-split into parallel sections", () => {
+  const encoded = encode([["copper-cable", "assembling-machine-2", 10]]);
+  const plan = planHelmodString(encoded);
+  expect(plan.issues).toEqual([]);
+  expect(plan.sections).toBe(2);
+  expect(plan.units[0].sectionCounts).toEqual([5, 5]);
+  const blueprint = decodeBlueprint(processHelmodString(encoded)).blueprint;
+  expect(
+    blueprint.entities.filter((e) => e.recipe === "copper-cable"),
+  ).toHaveLength(10);
 });
 
 test("does not silently export an underproduced intermediate", () => {

@@ -16,7 +16,8 @@ export const NORTH = 0,
   SOUTH = 8,
   WEST = 12;
 export const COLUMN_SPACING = 20,
-  MAX_PER_COLUMN = 12;
+  MAX_PER_COLUMN = 12,
+  SECTION_GAP = 3;
 
 // Orient fluid-consuming machines so their first fluid input port opens EAST
 // at (x + right + 1, y + fluidPipeOffset):
@@ -79,7 +80,7 @@ function rightExtent({ unit, geometry }) {
 // Keep recipe dependency order while packing the lanes and their splitter taps.
 // A spare tile between columns prevents a downstream splitter from occupying
 // the preceding column's tap or output feeder on a shared material bus.
-function arrange(plan, compact, columnLimit) {
+function arrange(plan, compact, columnLimit, fixedEdges = null) {
   const columns = [];
   for (const unit of plan.units)
     for (let remaining = unit.count; remaining > 0; remaining -= columnLimit) {
@@ -126,11 +127,15 @@ function arrange(plan, compact, columnLimit) {
     );
   }
   const last = columns.at(-1);
-  const leftEdge = compact
-    ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
-    : -12;
+  const leftEdge = fixedEdges
+    ? fixedEdges.leftEdge
+    : compact
+      ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
+      : -12;
   const rightOfLast = rightExtent(last);
-  const rightEdge = last.x + (compact ? rightOfLast + 2 : rightOfLast + 8);
+  const rightEdge = fixedEdges
+    ? fixedEdges.rightEdge
+    : last.x + (compact ? rightOfLast + 2 : rightOfLast + 8);
   for (const bus of buses) {
     bus.external = plan.inputs.some((input) => input.name === bus.item);
     bus.exported = plan.outputs.some((output) => output.name === bus.item);
@@ -171,6 +176,7 @@ function arrange(plan, compact, columnLimit) {
     buses,
     leftEdge,
     rightEdge,
+    columnLimit,
     area: (rightEdge - leftEdge + 1) * (bottom - top + 1),
   };
 }
@@ -187,19 +193,114 @@ function compactArrangement(plan) {
   return best;
 }
 
+function withinWireReach(ax, ay, bx, by) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return dx * dx + dy * dy <= 81;
+}
+
+function findRelayPath(startTile, goalTile, occupied, { minX, maxX, minY, maxY }) {
+  const startKey = `${startTile.x},${startTile.y}`;
+  const queue = [{ x: startTile.x, y: startTile.y, path: [] }];
+  const visited = new Set([startKey]);
+  while (queue.length) {
+    const current = queue.shift();
+    if (withinWireReach(current.x, current.y, goalTile.x, goalTile.y))
+      return current.path;
+    const candidates = [];
+    const x0 = Math.max(minX, current.x - 9);
+    const x1 = Math.min(maxX, current.x + 9);
+    const y0 = Math.max(minY, current.y - 9);
+    const y1 = Math.min(maxY, current.y + 9);
+    for (let tx = x0; tx <= x1; tx++)
+      for (let ty = y0; ty <= y1; ty++) {
+        const key = `${tx},${ty}`;
+        if (visited.has(key) || occupied.has(key)) continue;
+        if (!withinWireReach(current.x, current.y, tx, ty)) continue;
+        candidates.push({
+          x: tx,
+          y: ty,
+          score:
+            Math.hypot(tx - goalTile.x, ty - goalTile.y) +
+            0.05 * Math.abs(tx - goalTile.x),
+        });
+      }
+    candidates.sort((a, b) => a.score - b.score);
+    for (const next of candidates) {
+      visited.add(`${next.x},${next.y}`);
+      queue.push({
+        x: next.x,
+        y: next.y,
+        path: [...current.path, { x: next.x, y: next.y }],
+      });
+    }
+  }
+  return null;
+}
+
 export function createLayout(
   plan,
   { compact = plan.layoutMode === "compact" } = {},
 ) {
   if (plan.issues.length) throw new Error(plan.issues.join(" "));
-  const { columns, buses, leftEdge, rightEdge } = compact
-    ? compactArrangement(plan)
-    : arrange(plan, false, MAX_PER_COLUMN);
+  const sections = plan.sections ?? 1;
+  const sectionPlans =
+    sections === 1
+      ? [plan]
+      : Array.from({ length: sections }, (_, sectionIndex) => ({
+          ...plan,
+          units: plan.units.map((unit) => ({
+            ...unit,
+            count:
+              unit.sectionCounts?.[sectionIndex] ??
+              Math.ceil(unit.count / sections),
+            crafts: unit.crafts / sections,
+          })),
+          inputs: plan.inputs.map((input) => ({
+            ...input,
+            rate: input.rate / sections,
+          })),
+          outputs: plan.outputs.map((output) => ({
+            ...output,
+            rate: output.rate / sections,
+          })),
+        }));
+  const arrangementCache = new Map();
+  let arrangements = sectionPlans.map((sectionPlan) => {
+    const key = sectionPlan.units.map((unit) => unit.count).join(",");
+    if (!arrangementCache.has(key)) {
+      arrangementCache.set(
+        key,
+        compact
+          ? compactArrangement(sectionPlan)
+          : arrange(sectionPlan, false, MAX_PER_COLUMN),
+      );
+    }
+    return arrangementCache.get(key);
+  });
+  const sharedLeftEdge = Math.min(...arrangements.map((a) => a.leftEdge));
+  const sharedRightEdge = Math.max(...arrangements.map((a) => a.rightEdge));
+  if (
+    arrangements.some(
+      (a) => a.leftEdge !== sharedLeftEdge || a.rightEdge !== sharedRightEdge,
+    )
+  ) {
+    arrangements = arrangements.map((a, index) =>
+      a.leftEdge === sharedLeftEdge && a.rightEdge === sharedRightEdge
+        ? a
+        : arrange(sectionPlans[index], compact, a.columnLimit, {
+            leftEdge: sharedLeftEdge,
+            rightEdge: sharedRightEdge,
+          }),
+    );
+  }
   const tier = BELTS[plan.belt];
   const entities = [],
     occupied = new Set(),
     annotations = [],
-    poles = [];
+    poles = [],
+    sectionPolesList = [],
+    sectionBounds = [];
   function add(name, x, y, extra = {}) {
     const entity = {
       entity_number: entities.length + 1,
@@ -227,175 +328,260 @@ export function createLayout(
     entities.push(entity);
     return entity;
   }
-  const belt = (x, y, direction) => add(plan.belt, x, y, { direction });
-  const underground = (x, y, direction, type) =>
-    add(tier.underground, x, y, { direction, type });
-  const pipe = (x, y) => add("pipe", x, y);
-  const undergroundPipe = (x, y, direction) =>
-    add("pipe-to-ground", x, y, { direction });
-  const pole = (x, y) => poles.push(add("medium-electric-pole", x, y));
-  // Cross each bus separately; every tunnel spans just 2 hidden tiles. This
-  // works for any number of buses and leaves room for a splitter's second tile.
-  function vertical(x, from, to, direction, ownRow) {
-    const hidden = new Set(),
-      endpoints = new Map();
-    for (const bus of buses)
-      if (
-        bus.row !== ownRow &&
-        bus.row - 1 >= from &&
-        bus.row + 2 <= to &&
-        (!compact || (x >= bus.from && x <= bus.to))
-      ) {
-        endpoints.set(bus.row - 1, direction === SOUTH ? "input" : "output");
-        endpoints.set(bus.row + 2, direction === SOUTH ? "output" : "input");
-        hidden.add(bus.row);
-        hidden.add(bus.row + 1);
-      }
-    for (let y = from; y <= to; y++) {
-      if (hidden.has(y)) continue;
-      if (endpoints.has(y)) underground(x, y, direction, endpoints.get(y));
-      else belt(x, y, direction);
-    }
-  }
-  function verticalPipe(x, from, to, ownRow) {
-    const hidden = new Set(),
-      endpoints = new Map();
-    for (const bus of buses) {
-      const crossesRow =
-        !compact ||
-        (x >= bus.from && x <= bus.to) ||
-        (bus.fluid && x >= bus.from - 1 && x <= bus.to + 1);
-      if (
-        bus.row !== ownRow &&
-        bus.row - 1 >= from &&
-        bus.row + 2 <= to &&
-        crossesRow
-      ) {
-        endpoints.set(bus.row - 1, NORTH);
-        endpoints.set(bus.row + 2, SOUTH);
-        hidden.add(bus.row);
-        hidden.add(bus.row + 1);
-      }
-    }
-    for (let y = from; y <= to; y++) {
-      if (hidden.has(y)) continue;
-      if (endpoints.has(y)) undergroundPipe(x, y, endpoints.get(y));
-      else pipe(x, y);
-    }
-  }
-  for (const bus of buses) {
-    const { external, exported, from, to, fluid } = bus;
-    if (fluid) {
-      for (let x = from; x <= to; x++) pipe(x, bus.row);
-    } else {
-      const splitters = new Set(bus.taps.map((x) => x - 1));
-      for (let x = from; x <= to; x++) {
-        if (splitters.has(x))
-          add(tier.splitter, x, bus.row + 0.5, {
-            direction: EAST,
-            output_priority: "right",
-          });
-        else belt(x, bus.row, EAST);
-      }
-    }
-    if (external)
-      annotations.push({
-        x: leftEdge,
-        y: bus.row,
-        item: bus.item,
-        kind: "input",
-        ...(fluid ? { fluid: true } : {}),
-        rate: plan.inputs.find((input) => input.name === bus.item).rate,
-      });
-    if (exported)
-      annotations.push({
-        x: rightEdge,
-        y: bus.row,
-        item: bus.item,
-        kind: "output",
-        rate: plan.outputs.find((output) => output.name === bus.item).rate,
-      });
-    if (fluid) {
-      for (const x of bus.taps) verticalPipe(x, bus.row + 1, -2, bus.row);
-    } else {
-      for (const x of bus.taps)
-        vertical(x, bus.row + 1, compact ? -3 : -4, SOUTH, bus.row);
-      for (const x of bus.feeders) vertical(x, bus.row + 1, -3, NORTH, bus.row);
-    }
-  }
   const outputInserterExtra =
     plan.outputStackSize > 1
       ? { direction: WEST, override_stack_size: plan.outputStackSize }
       : { direction: WEST };
   const outputInserterName =
     plan.outputStackSize > 1 ? "stack-inserter" : "fast-inserter";
-  for (const { x, unit, count } of columns) {
-    const geometry = machineGeometry(unit.factory, compact);
-    const rowSpacing = geometry.rowSpacing;
-    const solids = solidIngredients(unit);
-    const hasFluid = fluidIngredients(unit).length > 0;
-    // Compact lanes connect directly to the bus; standard lanes fan out.
-    solids.forEach((ingredient, i) => {
-      const channel = x + geometry.channels[i],
-        lane = x + geometry.lanes[i];
-      const bend = compact || i !== 0 ? -2 : -3;
-      for (let y = compact ? -2 : -3; y < bend; y++)
-        belt(channel, y, SOUTH);
-      const step = lane > channel ? 1 : -1;
-      for (let bx = channel; bx !== lane; bx += step)
-        belt(bx, bend, step === 1 ? EAST : WEST);
-      for (let y = bend; y <= (count - 1) * rowSpacing + 1; y++)
-        belt(lane, y, SOUTH);
-    });
-    const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
-    const outputEndY = (count - 1) * rowSpacing + outputOffset;
-    for (let y = -2; y <= outputEndY; y++)
-      belt(x + geometry.outputBelt, y, NORTH);
-    if (hasFluid)
-      for (
-        let y = -1;
-        y <= (count - 1) * rowSpacing + geometry.fluidPipeOffset;
-        y++
-      )
-        pipe(x + geometry.fluidPipeLane, y);
-    for (let i = 0; i < count; i++) {
-      const y = i * rowSpacing;
-      add(unit.factory, x, y, machineOptions(unit, hasFluid));
-      if (hasFluid) {
-        const pipeY = y + geometry.fluidPipeOffset;
-        undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
-        undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
-      }
-      add(
-        outputInserterName,
-        x + geometry.outputInserter,
-        y + outputOffset,
-        outputInserterExtra,
-      );
-      if (solids[0])
-        add("fast-inserter", x - 2, y, { direction: WEST });
-      if (solids[1])
-        add("long-handed-inserter", x - 2, y + 1, { direction: WEST });
-      if (solids[2])
-        add("long-handed-inserter", x + geometry.outputInserter, y + 1, { direction: EAST });
-      if (!compact) pole(x, y + geometry.poleGap);
-      else if (i % 2 === 0) {
-        // Side poles cover two touching machine rows and their inserters.
-        pole(x - 2, y + geometry.poleGap);
-        pole(x + geometry.poleRight, y + geometry.poleRightGap);
+
+  function placeSection(sectionPlan, arrangement, yShift, sectionNumber) {
+    const { columns, buses, leftEdge, rightEdge } = arrangement;
+    const sectionPoles = [];
+    const startIndex = entities.length;
+    const belt = (x, y, direction) => add(plan.belt, x, y + yShift, { direction });
+    const underground = (x, y, direction, type) =>
+      add(tier.underground, x, y + yShift, { direction, type });
+    const pipe = (x, y) => add("pipe", x, y + yShift);
+    const undergroundPipe = (x, y, direction) =>
+      add("pipe-to-ground", x, y + yShift, { direction });
+    const pole = (x, y) => {
+      const p = add("medium-electric-pole", x, y + yShift);
+      poles.push(p);
+      sectionPoles.push(p);
+      return p;
+    };
+    // Cross each bus separately; every tunnel spans just 2 hidden tiles. This
+    // works for any number of buses and leaves room for a splitter's second tile.
+    function vertical(x, from, to, direction, ownRow) {
+      const hidden = new Set(),
+        endpoints = new Map();
+      for (const bus of buses)
+        if (
+          bus.row !== ownRow &&
+          bus.row - 1 >= from &&
+          bus.row + 2 <= to &&
+          (!compact || (x >= bus.from && x <= bus.to))
+        ) {
+          endpoints.set(bus.row - 1, direction === SOUTH ? "input" : "output");
+          endpoints.set(bus.row + 2, direction === SOUTH ? "output" : "input");
+          hidden.add(bus.row);
+          hidden.add(bus.row + 1);
+        }
+      for (let y = from; y <= to; y++) {
+        if (hidden.has(y)) continue;
+        if (endpoints.has(y)) underground(x, y, direction, endpoints.get(y));
+        else belt(x, y, direction);
       }
     }
-    pole(x - 2, -2);
-    pole(x + geometry.outputInserter, -2);
-    if (!compact && x < columns.at(-1).x) pole(x + 10, -2);
-    annotations.push({
-      x: x + geometry.centerOffset - 0.5,
-      y: -1,
-      item: unit.recipe,
-      kind: "machine",
-      count,
+    function verticalPipe(x, from, to, ownRow) {
+      const hidden = new Set(),
+        endpoints = new Map();
+      for (const bus of buses) {
+        const crossesRow =
+          !compact ||
+          (x >= bus.from && x <= bus.to) ||
+          (bus.fluid && x >= bus.from - 1 && x <= bus.to + 1);
+        if (
+          bus.row !== ownRow &&
+          bus.row - 1 >= from &&
+          bus.row + 2 <= to &&
+          crossesRow
+        ) {
+          endpoints.set(bus.row - 1, NORTH);
+          endpoints.set(bus.row + 2, SOUTH);
+          hidden.add(bus.row);
+          hidden.add(bus.row + 1);
+        }
+      }
+      for (let y = from; y <= to; y++) {
+        if (hidden.has(y)) continue;
+        if (endpoints.has(y)) undergroundPipe(x, y, endpoints.get(y));
+        else pipe(x, y);
+      }
+    }
+    for (const bus of buses) {
+      const { external, exported, from, to, fluid } = bus;
+      if (fluid) {
+        for (let x = from; x <= to; x++) pipe(x, bus.row);
+      } else {
+        const splitters = new Set(bus.taps.map((x) => x - 1));
+        for (let x = from; x <= to; x++) {
+          if (splitters.has(x))
+            add(tier.splitter, x, bus.row + 0.5 + yShift, {
+              direction: EAST,
+              output_priority: "right",
+            });
+          else belt(x, bus.row, EAST);
+        }
+      }
+      if (external)
+        annotations.push({
+          x: leftEdge,
+          y: bus.row + yShift,
+          item: bus.item,
+          kind: "input",
+          ...(fluid ? { fluid: true } : {}),
+          ...(sectionNumber ? { section: sectionNumber } : {}),
+          rate: sectionPlan.inputs.find((input) => input.name === bus.item).rate,
+        });
+      if (exported)
+        annotations.push({
+          x: rightEdge,
+          y: bus.row + yShift,
+          item: bus.item,
+          kind: "output",
+          ...(sectionNumber ? { section: sectionNumber } : {}),
+          rate: sectionPlan.outputs.find((output) => output.name === bus.item).rate,
+        });
+      if (fluid) {
+        for (const x of bus.taps) verticalPipe(x, bus.row + 1, -2, bus.row);
+      } else {
+        for (const x of bus.taps)
+          vertical(x, bus.row + 1, compact ? -3 : -4, SOUTH, bus.row);
+        for (const x of bus.feeders) vertical(x, bus.row + 1, -3, NORTH, bus.row);
+      }
+    }
+    for (const { x, unit, count } of columns) {
+      const geometry = machineGeometry(unit.factory, compact);
+      const rowSpacing = geometry.rowSpacing;
+      const solids = solidIngredients(unit);
+      const hasFluid = fluidIngredients(unit).length > 0;
+      // Compact lanes connect directly to the bus; standard lanes fan out.
+      solids.forEach((ingredient, i) => {
+        const channel = x + geometry.channels[i],
+          lane = x + geometry.lanes[i];
+        const bend = compact || i !== 0 ? -2 : -3;
+        for (let y = compact ? -2 : -3; y < bend; y++)
+          belt(channel, y, SOUTH);
+        const step = lane > channel ? 1 : -1;
+        for (let bx = channel; bx !== lane; bx += step)
+          belt(bx, bend, step === 1 ? EAST : WEST);
+        for (let y = bend; y <= (count - 1) * rowSpacing + 1; y++)
+          belt(lane, y, SOUTH);
+      });
+      const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
+      const outputEndY = (count - 1) * rowSpacing + outputOffset;
+      for (let y = -2; y <= outputEndY; y++)
+        belt(x + geometry.outputBelt, y, NORTH);
+      if (hasFluid)
+        for (
+          let y = -1;
+          y <= (count - 1) * rowSpacing + geometry.fluidPipeOffset;
+          y++
+        )
+          pipe(x + geometry.fluidPipeLane, y);
+      for (let i = 0; i < count; i++) {
+        const y = i * rowSpacing;
+        add(unit.factory, x, y + yShift, machineOptions(unit, hasFluid));
+        if (hasFluid) {
+          const pipeY = y + geometry.fluidPipeOffset;
+          undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
+          undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
+        }
+        add(
+          outputInserterName,
+          x + geometry.outputInserter,
+          y + outputOffset + yShift,
+          outputInserterExtra,
+        );
+        if (solids[0])
+          add("fast-inserter", x - 2, y + yShift, { direction: WEST });
+        if (solids[1])
+          add("long-handed-inserter", x - 2, y + 1 + yShift, { direction: WEST });
+        if (solids[2])
+          add("long-handed-inserter", x + geometry.outputInserter, y + 1 + yShift, { direction: EAST });
+        if (!compact) pole(x, y + geometry.poleGap);
+        else if (i % 2 === 0) {
+          // Side poles cover two touching machine rows and their inserters.
+          pole(x - 2, y + geometry.poleGap);
+          pole(x + geometry.poleRight, y + geometry.poleRightGap);
+        }
+      }
+      pole(x - 2, -2);
+      pole(x + geometry.outputInserter, -2);
+      if (!compact && x < columns.at(-1).x) pole(x + 10, -2);
+      annotations.push({
+        x: x + geometry.centerOffset - 0.5,
+        y: -1 + yShift,
+        item: unit.recipe,
+        kind: "machine",
+        ...(sectionNumber ? { section: sectionNumber } : {}),
+        count,
+      });
+    }
+    let minY = Infinity,
+      maxY = -Infinity;
+    for (let i = startIndex; i < entities.length; i++) {
+      const entity = entities[i];
+      const [, height] = entitySize(entity);
+      minY = Math.min(minY, entity.position.y - height / 2);
+      maxY = Math.max(maxY, entity.position.y + height / 2);
+    }
+    sectionPolesList.push(sectionPoles);
+    sectionBounds.push({
+      section: sectionNumber ?? 1,
+      top: minY,
+      bottom: maxY,
     });
+    return maxY;
   }
+
+  let previousBottom = null;
+  for (let s = 0; s < sections; s++) {
+    const arrangement = arrangements[s];
+    const sectionTop = Math.min(...arrangement.buses.map((bus) => bus.row));
+    const yShift = s === 0 ? 0 : previousBottom + SECTION_GAP - sectionTop;
+    previousBottom = placeSection(
+      sectionPlans[s],
+      arrangement,
+      yShift,
+      sections > 1 ? s + 1 : null,
+    );
+  }
+
+  // Bridge power between consecutive parallel sections using unoccupied interior
+  // tiles so all sections share one connected power grid without blocking edges.
+  for (let s = 0; s < sections - 1; s++) {
+    let bestA = null,
+      bestB = null,
+      bestDist = Infinity;
+    for (const a of sectionPolesList[s]) {
+      for (const b of sectionPolesList[s + 1]) {
+        const dist = Math.hypot(
+          a.position.x - b.position.x,
+          a.position.y - b.position.y,
+        );
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestA = a;
+          bestB = b;
+        }
+      }
+    }
+    if (!bestA || !bestB || bestDist <= 9) continue;
+    const startTile = {
+      x: Math.round(bestA.position.x - 0.5),
+      y: Math.round(bestA.position.y - 0.5),
+    };
+    const goalTile = {
+      x: Math.round(bestB.position.x - 0.5),
+      y: Math.round(bestB.position.y - 0.5),
+    };
+    const corridor = {
+      minX: Math.min(sharedLeftEdge + 1, startTile.x, goalTile.x),
+      maxX: Math.max(sharedRightEdge - 1, startTile.x, goalTile.x),
+      minY: Math.min(startTile.y, goalTile.y) - 2,
+      maxY: Math.max(startTile.y, goalTile.y) + 2,
+    };
+    const path = findRelayPath(startTile, goalTile, occupied, corridor);
+    if (!path)
+      throw new Error("Unable to bridge power between parallel sections.");
+    for (const step of path) {
+      poles.push(add("medium-electric-pole", step.x, step.y));
+    }
+  }
+
   // Explicit Factorio 2.0 copper-wire spanning tree, within the 9-tile reach.
   const wired = new Set([poles[0]]),
     wires = [],
@@ -416,11 +602,16 @@ export function createLayout(
   }
   if (wired.size !== poles.length)
     throw new Error("The layout has a disconnected power pole.");
-  const hasFluids = buses.some((bus) => bus.fluid);
+  const hasFluids = arrangements.some((a) => a.buses.some((bus) => bus.fluid));
   const intro = hasFluids
     ? "Inputs enter from the west (belts for items, pipes for fluids); outputs leave to the east. Connect the poles to power."
     : "Inputs enter from the west; outputs leave to the east. Connect the poles to power.";
   const description = [
+    ...(sections > 1
+      ? [
+          `Split into ${sections} parallel sections so every belt lane${hasFluids ? " and pipe" : ""} stays within capacity.`,
+        ]
+      : []),
     intro,
     ...(compact
       ? ["Compact layout: tightly packed machine columns and shared bus rows for separate material runs."]
@@ -429,18 +620,19 @@ export function createLayout(
       .filter((a) => a.kind !== "machine")
       .map(
         (a) =>
-          `${a.kind}: ${title(a.item)}${a.fluid ? " (pipe)" : ""} ${formatRate(a.rate)}/min at (${a.x + 0.5}, ${a.y + 0.5})`,
+          `${a.kind}${a.section ? ` (section ${a.section})` : ""}: ${title(a.item)}${a.fluid ? " (pipe)" : ""} ${formatRate(a.rate)}/min at (${a.x + 0.5}, ${a.y + 0.5})`,
       ),
     ...plan.warnings,
   ].join("\n");
+  const baseLabel =
+    "Router: " +
+    (plan.outputs.length > 3
+      ? `${plan.outputs.length} output targets`
+      : plan.outputs.map((output) => title(output.name)).join(", "));
   const blueprint = {
     blueprint: {
       item: "blueprint",
-      label:
-        "Router: " +
-        (plan.outputs.length > 3
-          ? `${plan.outputs.length} output targets`
-          : plan.outputs.map((output) => title(output.name)).join(", ")),
+      label: sections > 1 ? `${baseLabel} (${sections}×)` : baseLabel,
       description,
       version: 562949953421312,
       icons: plan.outputs
@@ -468,31 +660,35 @@ export function createLayout(
     height: extents.bottom - extents.top,
   };
   footprint.area = footprint.width * footprint.height;
-  const bounds = compact
-    ? {
-        left: extents.left - 2,
-        top: extents.top - 3,
-        right: extents.right + 2,
-        bottom: extents.bottom + 2,
-      }
-    : {
-        left: leftEdge - 2,
-        top: Math.min(...buses.map((bus) => bus.row)) - 3,
-        right: rightEdge + 2,
-        bottom: Math.max(
-        ...columns.map(
-          (column) =>
-            (column.count - 1) * column.geometry.rowSpacing +
-            column.geometry.size +
-            1,
-        ),
-        ),
-      };
+  const firstArrangement = arrangements[0];
+  const bounds =
+    compact || sections > 1
+      ? {
+          left: extents.left - 2,
+          top: extents.top - 3,
+          right: extents.right + 2,
+          bottom: extents.bottom + 2,
+        }
+      : {
+          left: firstArrangement.leftEdge - 2,
+          top: Math.min(...firstArrangement.buses.map((bus) => bus.row)) - 3,
+          right: firstArrangement.rightEdge + 2,
+          bottom: Math.max(
+            ...firstArrangement.columns.map(
+              (column) =>
+                (column.count - 1) * column.geometry.rowSpacing +
+                column.geometry.size +
+                1,
+            ),
+          ),
+        };
   return {
     blueprint,
     annotations,
     bounds,
     footprint,
+    sections,
+    sectionBounds,
     materials: Object.entries(
       entities.reduce(
         (counts, entity) => ({
