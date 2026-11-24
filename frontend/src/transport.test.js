@@ -71,7 +71,12 @@ test("stacked inputs do not grant stacked capacity to intermediate producers", (
 test("stacked outputs do not increase external supply capacity or input inserter speed", () => {
   expect(plan({ spaceAge: true, outputStackSize: 4, outputs: outputs("iron-gear-wheel", 300) }).issues.join()).toMatch(/Iron plate needs 600\/min/);
   for (const recipe of RECIPES) {
-    const factory = recipe.category === "smelting" ? "electric-furnace" : "assembling-machine-3";
+    const factory =
+      recipe.category === "smelting"
+        ? "electric-furnace"
+        : recipe.category === "chemistry"
+          ? "chemical-plant"
+          : "assembling-machine-3";
     const crafts = craftingCapacity(recipe, factory, 4);
     solidIngredients(recipe).forEach((item, i) => expect(crafts * item.amount).toBeLessThanOrEqual(i === 0 ? 90 : 45));
     expect(crafts * recipe.results[0].amount).toBeLessThanOrEqual(360);
@@ -169,17 +174,20 @@ test("fluid supply limits convert between fluid/min and fluid/s without belt sca
     inputStackSize: 4,
     outputStackSize: 4,
     outputs: outputs("processing-unit", 60),
-    inputLimits: { "sulfuric-acid": 300, "plastic-bar": 240 },
+    inputLimits: { "sulfuric-acid": 300, "petroleum-gas": 2400, coal: 120 },
   };
   const before = plan(config);
   expect(before.issues).toEqual([]);
   config = convertRateUnit(config, "items/s");
   expect(config.inputLimits["sulfuric-acid"]).toBe(5);
+  expect(config.inputLimits["petroleum-gas"]).toBe(40);
   expect(plan(config)).toEqual(before);
   config = convertRateUnit(config, "belts");
   expect(config.inputLimits["sulfuric-acid"]).toBe(5);
+  expect(config.inputLimits["petroleum-gas"]).toBe(40);
   expect(plan(config)).toEqual(before);
   config = convertRateUnit(config, "items/min");
   expect(config.inputLimits["sulfuric-acid"]).toBe(300);
+  expect(config.inputLimits["petroleum-gas"]).toBe(2400);
   expect(plan(config)).toEqual(before);
 });

@@ -151,3 +151,20 @@ test("Helmod imports processing units with fluid supply and rejects assembling-m
   expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
   expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
 });
+
+test("Helmod imports plastic bars on chemical plants and rejects assemblers", () => {
+  expect(() =>
+    planHelmodString(encode([["plastic-bar", "assembling-machine-2", 2]])),
+  ).toThrow(/chemical plant/);
+
+  const encoded = encode([["plastic-bar", "chemical-plant", 2]]);
+  const plan = planHelmodString(encoded);
+  expect(plan.outputs).toEqual([{ name: "plastic-bar", rate: 180 }]);
+  expect(plan.inputs).toEqual([
+    { name: "coal", rate: 90 },
+    { name: "petroleum-gas", rate: 1800, type: "fluid" },
+  ]);
+  const blueprint = decodeBlueprint(processHelmodString(encoded)).blueprint;
+  expect(blueprint.entities.filter((e) => e.name === "chemical-plant")).toHaveLength(2);
+  expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
+});
