@@ -345,6 +345,29 @@ test("plans processing units with sulfuric-acid fluid supply and compatible mach
   expect(splitPipe.issues).toEqual([]);
   expect(splitPipe.sections).toBe(2);
   expect(splitPipe.bottlenecks[0].name).toBe("sulfuric-acid");
+
+  // Direct finishPlan checks smallest-slice capacity: 9 full-capacity AM2s
+  // cannot run at 202.5 crafts/section in a [5, 4] split so they resolve to 3×3,
+  // whereas 9 AM2s at 300 total crafts have headroom in the 4-machine slice.
+  const fullOdd = finishPlan(
+    [{ recipe: "copper-cable", factory: "assembling-machine-2", count: 9, crafts: 405 }],
+    [{ name: "copper-plate", rate: 405 }],
+    [{ name: "copper-cable", rate: 810 }],
+    DEFAULT_CONFIG,
+  );
+  expect(fullOdd.issues).toEqual([]);
+  expect(fullOdd.sections).toBe(3);
+  expect(fullOdd.units[0].sectionCounts).toEqual([3, 3, 3]);
+
+  const headroomOdd = finishPlan(
+    [{ recipe: "copper-cable", factory: "assembling-machine-2", count: 9, crafts: 300 }],
+    [{ name: "copper-plate", rate: 300 }],
+    [{ name: "copper-cable", rate: 600 }],
+    DEFAULT_CONFIG,
+  );
+  expect(headroomOdd.issues).toEqual([]);
+  expect(headroomOdd.sections).toBe(2);
+  expect(headroomOdd.units[0].sectionCounts).toEqual([5, 4]);
 });
 
 test("builds plastic bars in chemical plants as an intermediate and supports external override", () => {

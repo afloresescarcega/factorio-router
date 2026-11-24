@@ -256,16 +256,23 @@ export function finishPlan(units, inputs, outputs, config = {}) {
       if (!unit.sectionCounts) unit.sectionCounts = [unit.count];
     }
   } else if (!hasExplicitSplit) {
-    // Fixed-count callers (Helmod or direct finishPlan) need at least one
-    // machine per recipe in every parallel sub-section, and the largest
-    // integer slice of a fixed count must still stay within lane capacity.
+    // Fixed-count callers (Helmod or direct finishPlan) feed every parallel
+    // section at 1/count of the total rate, so each unit's smallest integer
+    // slice must cover 1/count of its crafts within single-lane/pipe limits.
     const canSplitAt = (count) => {
-      if (!ordered.every((unit) => unit.count >= count)) return false;
-      const maxShare = Math.max(
-        ...ordered.map((unit) => Math.ceil(unit.count / count) / unit.count),
-      );
+      if (
+        !ordered.every((unit) => {
+          const minSlice = Math.floor(unit.count / count);
+          if (minSlice < 1) return false;
+          const sliceCapacity =
+            minSlice *
+            craftingCapacity(recipeById[unit.recipe], unit.factory, outputStackSize);
+          return !rateExceeds(unit.crafts / count, sliceCapacity);
+        })
+      )
+        return false;
       return rawTransport.every(
-        (entry) => !rateExceeds(entry.rate * maxShare, entryCapacity(entry)),
+        (entry) => !rateExceeds(entry.rate / count, entryCapacity(entry)),
       );
     };
     const minUnitCount = Math.min(...ordered.map((unit) => unit.count));
@@ -282,12 +289,18 @@ export function finishPlan(units, inputs, outputs, config = {}) {
         unit.sectionCounts = splitCount(unit.count, sections);
       }
     } else if (config.sections === undefined) {
+      const hasEnoughMachines = ordered.every(
+        (unit) => unit.count >= neededSections,
+      );
       for (const entry of rawTransport) {
-        const issue = checkTransportIssue(
-          entry,
-          belt,
-          `Splitting across ${neededSections} sections requires at least ${neededSections} machines per production step.`,
-        );
+        const reason = hasEnoughMachines
+          ? `Fixed machine counts cannot be split across ${neededSections} or more parallel sections without under-sizing a section.${
+              entry.type === "fluid"
+                ? " Adjust the machine counts."
+                : " Adjust the machine counts, use a faster belt, or increase the stack size."
+            }`
+          : `Splitting across ${neededSections} sections requires at least ${neededSections} machines per production step.`;
+        const issue = checkTransportIssue(entry, belt, reason);
         if (issue) issues.push(issue);
       }
       sections = 1;

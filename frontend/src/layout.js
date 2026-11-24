@@ -199,39 +199,100 @@ function withinWireReach(ax, ay, bx, by) {
   return dx * dx + dy * dy <= 81;
 }
 
+const WIRE_REACH_OFFSETS = [];
+for (let dx = -9; dx <= 9; dx++) {
+  for (let dy = -9; dy <= 9; dy++) {
+    if ((dx !== 0 || dy !== 0) && dx * dx + dy * dy <= 81) {
+      WIRE_REACH_OFFSETS.push([dx, dy]);
+    }
+  }
+}
+
+function compareRelayNodes(a, b) {
+  if (Math.abs(a.f - b.f) > 1e-9) return a.f - b.f;
+  if (a.dx !== b.dx) return a.dx - b.dx;
+  if (a.y !== b.y) return a.y - b.y;
+  return a.x - b.x;
+}
+
+function heapPush(heap, node) {
+  let index = heap.length;
+  heap.push(node);
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (compareRelayNodes(heap[index], heap[parent]) >= 0) break;
+    [heap[index], heap[parent]] = [heap[parent], heap[index]];
+    index = parent;
+  }
+}
+
+function heapPop(heap) {
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length) {
+    heap[0] = last;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      if (left < heap.length && compareRelayNodes(heap[left], heap[smallest]) < 0)
+        smallest = left;
+      if (right < heap.length && compareRelayNodes(heap[right], heap[smallest]) < 0)
+        smallest = right;
+      if (smallest === index) break;
+      [heap[index], heap[smallest]] = [heap[smallest], heap[index]];
+      index = smallest;
+    }
+  }
+  return top;
+}
+
 function findRelayPath(startTile, goalTile, occupied, { minX, maxX, minY, maxY }) {
   const startKey = `${startTile.x},${startTile.y}`;
-  const queue = [{ x: startTile.x, y: startTile.y, path: [] }];
-  const visited = new Set([startKey]);
-  while (queue.length) {
-    const current = queue.shift();
-    if (withinWireReach(current.x, current.y, goalTile.x, goalTile.y))
-      return current.path;
-    const candidates = [];
-    const x0 = Math.max(minX, current.x - 9);
-    const x1 = Math.min(maxX, current.x + 9);
-    const y0 = Math.max(minY, current.y - 9);
-    const y1 = Math.min(maxY, current.y + 9);
-    for (let tx = x0; tx <= x1; tx++)
-      for (let ty = y0; ty <= y1; ty++) {
-        const key = `${tx},${ty}`;
-        if (visited.has(key) || occupied.has(key)) continue;
-        if (!withinWireReach(current.x, current.y, tx, ty)) continue;
-        candidates.push({
-          x: tx,
-          y: ty,
-          score:
-            Math.hypot(tx - goalTile.x, ty - goalTile.y) +
-            0.05 * Math.abs(tx - goalTile.x),
-        });
+  const startDist = Math.hypot(startTile.x - goalTile.x, startTile.y - goalTile.y);
+  const heap = [
+    {
+      x: startTile.x,
+      y: startTile.y,
+      g: 0,
+      f: Math.max(0, startDist - 9) / 9,
+      dx: Math.abs(startTile.x - goalTile.x),
+      parent: null,
+    },
+  ];
+  const bestG = new Map([[startKey, 0]]);
+  const closed = new Set();
+  while (heap.length) {
+    const current = heapPop(heap);
+    const currentKey = `${current.x},${current.y}`;
+    if (closed.has(currentKey)) continue;
+    closed.add(currentKey);
+    if (withinWireReach(current.x, current.y, goalTile.x, goalTile.y)) {
+      const path = [];
+      for (let node = current; node.parent !== null; node = node.parent) {
+        path.push({ x: node.x, y: node.y });
       }
-    candidates.sort((a, b) => a.score - b.score);
-    for (const next of candidates) {
-      visited.add(`${next.x},${next.y}`);
-      queue.push({
-        x: next.x,
-        y: next.y,
-        path: [...current.path, { x: next.x, y: next.y }],
+      return path.reverse();
+    }
+    const nextG = current.g + 1;
+    for (const [ox, oy] of WIRE_REACH_OFFSETS) {
+      const tx = current.x + ox;
+      const ty = current.y + oy;
+      if (tx < minX || tx > maxX || ty < minY || ty > maxY) continue;
+      const key = `${tx},${ty}`;
+      if (closed.has(key) || occupied.has(key)) continue;
+      const prevG = bestG.get(key);
+      if (prevG !== undefined && prevG <= nextG) continue;
+      bestG.set(key, nextG);
+      const dist = Math.hypot(tx - goalTile.x, ty - goalTile.y);
+      heapPush(heap, {
+        x: tx,
+        y: ty,
+        g: nextG,
+        f: nextG + Math.max(0, dist - 9) / 9,
+        dx: Math.abs(tx - goalTile.x),
+        parent: current,
       });
     }
   }
@@ -682,6 +743,10 @@ export function createLayout(
             ),
           ),
         };
+  const materialCounts = {};
+  for (const entity of entities) {
+    materialCounts[entity.name] = (materialCounts[entity.name] || 0) + 1;
+  }
   return {
     blueprint,
     annotations,
@@ -689,14 +754,9 @@ export function createLayout(
     footprint,
     sections,
     sectionBounds,
-    materials: Object.entries(
-      entities.reduce(
-        (counts, entity) => ({
-          ...counts,
-          [entity.name]: (counts[entity.name] || 0) + 1,
-        }),
-        {},
-      ),
-    ).map(([name, count]) => ({ name, count })),
+    materials: Object.entries(materialCounts).map(([name, count]) => ({
+      name,
+      count,
+    })),
   };
 }

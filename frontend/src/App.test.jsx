@@ -411,14 +411,14 @@ test("saturated intermediate lines auto-batch into parallel sections and collaps
 
 test("processing units show piped sulfuric acid, pipe legend, and export valid pipe entities", () => {
   render(<App />);
-  fireEvent.change(screen.getByLabelText("Output recipe 1"), {
-    target: { value: "processing-unit" },
+  fireEvent.change(screen.getByLabelText("Belts"), {
+    target: { value: "express-transport-belt" },
   });
   fireEvent.change(screen.getByLabelText("Output rate 1"), {
     target: { value: "15" },
   });
-  fireEvent.change(screen.getByLabelText("Belts"), {
-    target: { value: "express-transport-belt" },
+  fireEvent.change(screen.getByLabelText("Output recipe 1"), {
+    target: { value: "processing-unit" },
   });
   expect(screen.getByLabelText("Sulfuric acid supply limit")).toBeInTheDocument();
   expect(screen.getByText(/Needs 75 fluid\/min/)).toBeInTheDocument();
@@ -430,6 +430,12 @@ test("processing units show piped sulfuric acid, pipe legend, and export valid p
   expect(document.querySelector(".legend")).toHaveTextContent("Pipes");
   expect(screen.getByText("Sulfuric acid (pipe)")).toBeInTheDocument();
   expect(screen.getByText("Petroleum gas (pipe)")).toBeInTheDocument();
+
+  const blueprint = decodeBlueprint(showExport().value).blueprint;
+  expect(blueprint.entities.some((e) => e.recipe === "processing-unit")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "chemical-plant" && e.recipe === "plastic-bar")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
 
   // Switching to belts mode keeps fluid inputs in fluid/s instead of belts.
   fireEvent.change(screen.getByLabelText("Rate units"), {
@@ -448,12 +454,6 @@ test("processing units show piped sulfuric acid, pipe legend, and export valid p
     target: { value: "" },
   });
   expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
-
-  const blueprint = decodeBlueprint(showExport().value).blueprint;
-  expect(blueprint.entities.some((e) => e.recipe === "processing-unit")).toBe(true);
-  expect(blueprint.entities.some((e) => e.name === "chemical-plant" && e.recipe === "plastic-bar")).toBe(true);
-  expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
-  expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
 
   // Supplying plastic externally removes chemical plants and offers a per-item Build in line toggle.
   const plasticRow = screen.getByRole("row", { name: /Plastic bar/ });
