@@ -1,8 +1,9 @@
 # Factorio Router frontend
 
-The frontend is a Vite + React application. It plans a solid-item production
-line locally, previews the resulting layout, and exports a Factorio blueprint
-string. Space Age plans can use the electromagnetic plant for electronics.
+The frontend is a Vite + React application. It plans a production line
+(including fluid-ingredient recipes such as processing units) locally,
+previews the resulting layout, and exports a Factorio blueprint string.
+Space Age plans can use the electromagnetic plant for electronics.
 Helmod import is optional.
 
 [Open the published app](https://afloresescarcega.github.io/factorio-router/).
@@ -32,6 +33,7 @@ node cli.mjs < helmod-export.txt > blueprint.txt
 node cli.mjs --compact < helmod-export.txt > compact-blueprint.txt
 node cli.mjs --plan < examples/em-circuits.json
 node cli.mjs --plan --compact < examples/em-circuits.json
+node cli.mjs --plan < examples/processing-units.json
 ```
 
 The app's **Compact layout** option and the CLI's `--compact` flag use the same

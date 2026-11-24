@@ -1,10 +1,36 @@
-import { MACHINES, RECIPES } from "./recipeCatalog.js";
+import {
+  MACHINES,
+  RECIPES,
+  fluidIngredients,
+  solidIngredients,
+} from "./recipeCatalog.js";
 import { BELTS, DEFAULT_CONFIG, planProduction } from "./planner.js";
-import { createLayout, entitySize, machineGeometry } from "./layout.js";
+import {
+  createLayout,
+  entitySize,
+  fluidMachineDirection,
+  machineGeometry,
+} from "./layout.js";
 import { encodeBlueprint, decodeBlueprint } from "./blueprintFactory.js";
 import { validateBlueprintString } from "../validator/validate.mjs";
 
 const vector = { 0: [0, -1], 4: [1, 0], 8: [0, 1], 12: [-1, 0] };
+const opposite = (direction) => (direction + 8) % 16;
+const rotateOffset = ([px, py], direction) => {
+  if (direction === 4) return [-py, px];
+  if (direction === 8) return [-px, -py];
+  if (direction === 12) return [py, -px];
+  return [px, py];
+};
+const isPipe = (entity) =>
+  entity && (entity.name === "pipe" || entity.name === "pipe-to-ground");
+const PIPE_UNDERGROUND_REACH = 10;
+// Base Factorio 2.0.72 first input fluid-box connections (direction, local offset).
+const MACHINE_FLUID_INPUT = {
+  "assembling-machine-2": { direction: 0, position: [0, -1] },
+  "assembling-machine-3": { direction: 0, position: [0, -1] },
+  "electromagnetic-plant": { direction: 12, position: [-1.5, 0.5] },
+};
 const key = (x, y) => `${x},${y}`;
 const build = (patch, options) =>
   createLayout(planProduction({ ...DEFAULT_CONFIG, ...patch }), options);
@@ -126,7 +152,9 @@ function inspect(layout) {
     return seen;
   }
   const inputsByItem = new Map();
-  for (const annotation of layout.annotations.filter((a) => a.kind === "input")) {
+  for (const annotation of layout.annotations.filter(
+    (a) => a.kind === "input" && !a.fluid,
+  )) {
     const input = tiles.get(key(annotation.x + 0.5, annotation.y + 0.5));
     expect(isTransport(input), `missing input ${annotation.item}`).toBe(true);
     const starts = inputsByItem.get(annotation.item) || [];
@@ -159,9 +187,10 @@ function inspect(layout) {
       inputsByItem.set(recipe, starts);
     } else {
       const data = RECIPES.find((r) => r.id === recipe);
+      const solids = solidIngredients(data);
       const index =
         entity.position.x > machine.position.x ? 2 : reach === 2 ? 1 : 0;
-      requiredPickups.push({ item: data.ingredients[index].name, pickup });
+      requiredPickups.push({ item: solids[index].name, pickup });
     }
   }
   for (const { item } of requiredPickups)
@@ -185,6 +214,96 @@ function inspect(layout) {
         ).toBe(output.item === item);
       }
     }
+  }
+  // Reconstruct the undirected fluid pipe graph from exported entities alone.
+  const pipeEntities = entities.filter(isPipe);
+  const pipeNeighbors = new Map(pipeEntities.map((p) => [p.entity_number, []]));
+  const aboveGroundDirs = (entity) =>
+    entity.name === "pipe" ? [0, 4, 8, 12] : [entity.direction ?? 0];
+  const pairedPipes = new Set();
+  for (const entity of pipeEntities) {
+    const { x, y } = entity.position;
+    for (const dir of aboveGroundDirs(entity)) {
+      const [dx, dy] = vector[dir];
+      const neighbor = tiles.get(key(x + dx, y + dy));
+      if (isPipe(neighbor) && aboveGroundDirs(neighbor).includes(opposite(dir)))
+        pipeNeighbors.get(entity.entity_number).push(neighbor.entity_number);
+    }
+    if (entity.name === "pipe-to-ground") {
+      const underDir = opposite(entity.direction ?? 0);
+      const [dx, dy] = vector[underDir];
+      let match = null;
+      for (let dist = 1; dist <= PIPE_UNDERGROUND_REACH; dist++) {
+        const target = tiles.get(key(x + dx * dist, y + dy * dist));
+        if (target?.name !== "pipe-to-ground") continue;
+        if ((target.direction ?? 0) === underDir) {
+          match = target;
+          break;
+        }
+        if ((target.direction ?? 0) === (entity.direction ?? 0)) break;
+      }
+      expect(match, `unpaired pipe-to-ground at ${x},${y}`).not.toBeNull();
+      pipeNeighbors.get(entity.entity_number).push(match.entity_number);
+      pairedPipes.add(match.entity_number);
+    }
+  }
+  for (const entity of pipeEntities.filter((e) => e.name === "pipe-to-ground"))
+    expect(
+      pairedPipes.has(entity.entity_number),
+      `pipe-to-ground not symmetrically paired at ${entity.position.x},${entity.position.y}`,
+    ).toBe(true);
+  const fluidInputsByName = new Map();
+  for (const annotation of layout.annotations.filter(
+    (a) => a.kind === "input" && a.fluid,
+  )) {
+    const entry = tiles.get(key(annotation.x + 0.5, annotation.y + 0.5));
+    expect(isPipe(entry), `missing fluid pipe input ${annotation.item}`).toBe(true);
+    fluidInputsByName.set(annotation.item, entry);
+  }
+  const requiredFluidPorts = [];
+  for (const machine of entities.filter((e) => MACHINES[e.name])) {
+    const recipe = RECIPES.find((r) => r.id === machine.recipe);
+    const fluids = fluidIngredients(recipe);
+    if (!fluids.length) continue;
+    const spec = MACHINE_FLUID_INPUT[machine.name];
+    expect(spec, `machine ${machine.name} has no fluid input box`).toBeDefined();
+    const dir = machine.direction ?? 0;
+    const [rpx, rpy] = rotateOffset(spec.position, dir);
+    const portDir = (spec.direction + dir) % 16;
+    const [dx, dy] = vector[portDir];
+    const pipeTile = tiles.get(
+      key(machine.position.x + rpx + dx, machine.position.y + rpy + dy),
+    );
+    expect(
+      isPipe(pipeTile) && aboveGroundDirs(pipeTile).includes(opposite(portDir)),
+      `missing connected pipe for ${machine.name} (${machine.recipe}) at ${machine.position.x},${machine.position.y}`,
+    ).toBe(true);
+    requiredFluidPorts.push({ fluid: fluids[0].name, pipe: pipeTile });
+  }
+  const pipeReachable = (start) => {
+    const seen = new Set(),
+      queue = [start.entity_number];
+    while (queue.length) {
+      const id = queue.pop();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      queue.push(...(pipeNeighbors.get(id) || []));
+    }
+    return seen;
+  };
+  for (const { fluid } of requiredFluidPorts)
+    expect(fluidInputsByName.has(fluid), `missing fluid source ${fluid}`).toBe(true);
+  for (const [fluid, start] of fluidInputsByName) {
+    const network = pipeReachable(start);
+    const xs = [...network].map((id) => entities[id - 1].position.x);
+    const ys = [...network].map((id) => entities[id - 1].position.y);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(320);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(320);
+    for (const port of requiredFluidPorts)
+      expect(
+        network.has(port.pipe.entity_number),
+        `fluid ${fluid} route to ${port.fluid}`,
+      ).toBe(port.fluid === fluid);
   }
   const poles = entities.filter((e) => e.name === "medium-electric-pole");
   for (const powered of entities.filter(
@@ -259,7 +378,11 @@ test("every catalog recipe exports without overlap, missing routes or invalid na
 });
 
 test("every electronics recipe exports on the electromagnetic plant", () => {
-  for (const recipe of RECIPES.filter((entry) => entry.category === "electronics")) {
+  for (const recipe of RECIPES.filter(
+    (entry) =>
+      entry.category === "electronics" ||
+      entry.category === "electronics-with-fluid",
+  )) {
     const layout = build({
       spaceAge: true,
       electronicsMachine: "electromagnetic-plant",
@@ -280,6 +403,63 @@ test("every electronics recipe exports on the electromagnetic plant", () => {
     ).toEqual({ ok: true, errors: [] });
   }
 });
+
+test.each(["standard", "compact"])(
+  "%s processing-unit layouts connect sulfuric-acid pipes on assemblers and electromagnetic plants",
+  (layoutMode) => {
+    const scenarios = [
+      {
+        assembler: "assembling-machine-2",
+        belt: "express-transport-belt",
+        outputs: [{ recipe: "processing-unit", rate: 15 }],
+        fromOre: true,
+      },
+      {
+        assembler: "assembling-machine-3",
+        belt: "express-transport-belt",
+        outputs: [{ recipe: "processing-unit", rate: 30 }],
+        machineOverrides: { "processing-unit": { count: 16 } },
+        intermediates: false,
+      },
+      {
+        spaceAge: true,
+        electronicsMachine: "electromagnetic-plant",
+        belt: "turbo-transport-belt",
+        inputStackSize: 2,
+        outputStackSize: 2,
+        outputs: [
+          { recipe: "processing-unit", rate: 30 },
+          { recipe: "advanced-circuit", rate: 30 },
+        ],
+        fromOre: true,
+      },
+    ];
+    for (const scenario of scenarios) {
+      const layout = build({ ...scenario, layoutMode });
+      const entities = layout.blueprint.blueprint.entities;
+      expect(entities.some((e) => e.name === "pipe")).toBe(true);
+      expect(entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
+      const puMachines = entities.filter((e) => e.recipe === "processing-unit");
+      expect(puMachines.length).toBeGreaterThan(0);
+      for (const machine of puMachines) {
+        expect(machine.direction).toBe(fluidMachineDirection(machine.name));
+      }
+      expect(
+        layout.annotations.some(
+          (a) => a.kind === "input" && a.fluid && a.item === "sulfuric-acid",
+        ),
+      ).toBe(true);
+      expect(layout.blueprint.blueprint.description).toMatch(
+        /Sulfuric acid \(pipe\)/,
+      );
+      inspect(layout);
+      expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({
+        ok: true,
+        errors: [],
+      });
+    }
+  },
+);
 
 test.each(["standard", "compact"])(
   "%s mixed EM circuit and assembler gear line has connected transport and power",
@@ -481,14 +661,14 @@ test("separate input and output materials safely share the same compact bus row"
   inspect(layout);
 });
 
-test.each(["standard", "compact"])("%s supports all 45 output targets with isolated routes and valid Space Age entities", (layoutMode) => {
+test.each(["standard", "compact"])("%s supports all catalog output targets with isolated routes and valid Space Age entities", (layoutMode) => {
   const config = {
     spaceAge: true,
     layoutMode, belt: "turbo-transport-belt", inputStackSize: 4, outputStackSize: 4,
     fromOre: true, outputs: RECIPES.map((recipe) => ({ recipe: recipe.id, rate: 0.01 })),
   };
   const layout = build(config);
-  expect(layout.annotations.filter((a) => a.kind === "output")).toHaveLength(45);
+  expect(layout.annotations.filter((a) => a.kind === "output")).toHaveLength(RECIPES.length);
   inspect(layout);
   const encoded = encodeBlueprint(layout.blueprint);
   expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });

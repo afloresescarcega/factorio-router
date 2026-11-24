@@ -7,15 +7,27 @@ const COLORS = {
   machine: "#6ba0a0",
   belt: "#e0b348",
   inserter: "#4f9fd6",
+  pipe: "#56c9c2",
   pole: "#c98ad6",
 };
 const WIRE = "#c8763a";
 const GRID = "#372f27";
-function entityColor(name, { machine, pole, inserter }) {
+function entityColor(name, { machine, pole, inserter, pipe }) {
   if (machine) return name === "electromagnetic-plant" ? "#d8a143" : COLORS.machine;
   if (pole) return COLORS.pole;
+  if (pipe) return COLORS.pipe;
   if (inserter) return name === "stack-inserter" ? "#c9ded3" : COLORS.inserter;
   return name.startsWith("turbo-") ? "#6ebd77" : COLORS.belt;
+}
+function entityOpacity({ machine, pole, pipe }) {
+  if (machine) return 0.85;
+  if (pole) return 0.9;
+  if (pipe) return 0.55;
+  return 0.45;
+}
+function annotationColor(annotation) {
+  if (annotation.fluid) return COLORS.pipe;
+  return annotation.kind === "input" ? "#7fcf83" : "#f9b44b";
 }
 function machineLabel(name) {
   if (name === "electromagnetic-plant") return "EM";
@@ -27,9 +39,11 @@ const Entity = memo(function Entity({ entity }) {
   const { x, y } = entity.position;
   const machine = Object.hasOwn(MACHINES, entity.name);
   const pole = entity.name === "medium-electric-pole";
+  const pipe = entity.name === "pipe" || entity.name === "pipe-to-ground";
   const inserter = entity.name.includes("inserter");
   const underground = entity.name.includes("underground");
-  const color = entityColor(entity.name, { machine, pole, inserter });
+  const color = entityColor(entity.name, { machine, pole, inserter, pipe });
+  const fillOpacity = entityOpacity({ machine, pole, pipe });
   return (
     <g>
       <title>
@@ -45,7 +59,7 @@ const Entity = memo(function Entity({ entity }) {
         height={h - 0.12}
         rx={machine ? 0.18 : 0.08}
         fill={color}
-        fillOpacity={machine ? 0.85 : pole ? 0.9 : 0.45}
+        fillOpacity={fillOpacity}
         stroke={color}
         strokeWidth=".045"
       />
@@ -72,7 +86,17 @@ const Entity = memo(function Entity({ entity }) {
         </>
       )}
       {pole && <circle cx={x} cy={y} r=".15" fill="#1a1512" />}
-      {!machine && !pole && (
+      {pipe && (
+        entity.name === "pipe-to-ground" ? (
+          <g transform={`translate(${x} ${y}) rotate(${(entity.direction || 0) * 22.5})`}>
+            <path d="M0 -.36 V.12" stroke="#d8f7f5" strokeWidth=".16" strokeLinecap="round" />
+            <path d="M-.28 .28 H.28" stroke="#ffe6c0" strokeWidth=".16" />
+          </g>
+        ) : (
+          <circle cx={x} cy={y} r=".18" fill="#1a1512" stroke="#d8f7f5" strokeWidth=".08" />
+        )
+      )}
+      {!machine && !pole && !pipe && (
         <g
           transform={`translate(${x} ${y}) rotate(${((entity.direction || 0) + (inserter ? 8 : 0)) * 22.5})`}
         >
@@ -109,6 +133,9 @@ function BlueprintPreview({ layout }) {
   const { bounds, blueprint, annotations, footprint } = layout;
   const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
   const hasElectromagneticPlant = blueprint.blueprint.entities.some((entity) => entity.name === "electromagnetic-plant");
+  const hasPipes = blueprint.blueprint.entities.some(
+    (entity) => entity.name === "pipe" || entity.name === "pipe-to-ground",
+  );
   const beltColor = blueprint.blueprint.entities.some((entity) => entity.name === "turbo-transport-belt") ? "#6ebd77" : COLORS.belt;
   const width = bounds.right - bounds.left + 1,
     height = bounds.bottom - bounds.top + 1;
@@ -201,30 +228,35 @@ function BlueprintPreview({ layout }) {
           ))}
           {annotations
             .filter((a) => a.kind !== "machine")
-            .map((a) => (
-              <g key={`${a.kind}-${a.item}`}>
-                <circle
-                  cx={a.x + 0.5}
-                  cy={a.y + 0.5}
-                  r=".48"
-                  fill="none"
-                  stroke={a.kind === "input" ? "#7fcf83" : "#f9b44b"}
-                  strokeWidth=".16"
-                />
-                <title>
-                  {a.kind}: {title(a.item)}
-                </title>
-                <text
-                  x={a.x + 0.5}
-                  y={a.y - 0.45}
-                  textAnchor={a.kind === "input" ? "start" : "end"}
-                  fill={a.kind === "input" ? "#7fcf83" : "#f9b44b"}
-                  fontSize=".8"
-                >
-                  {title(a.item)}
-                </text>
-              </g>
-            ))}
+            .map((a) => {
+              const stroke = annotationColor(a);
+              return (
+                <g key={`${a.kind}-${a.item}`}>
+                  <circle
+                    cx={a.x + 0.5}
+                    cy={a.y + 0.5}
+                    r=".48"
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth=".16"
+                  />
+                  <title>
+                    {a.kind}: {title(a.item)}
+                    {a.fluid ? " (pipe)" : ""}
+                  </title>
+                  <text
+                    x={a.x + 0.5}
+                    y={a.y - 0.45}
+                    textAnchor={a.kind === "input" ? "start" : "end"}
+                    fill={stroke}
+                    fontSize=".8"
+                  >
+                    {title(a.item)}
+                    {a.fluid ? " (pipe)" : ""}
+                  </text>
+                </g>
+              );
+            })}
         </svg>
       </div>
       <div className="legend">
@@ -237,6 +269,7 @@ function BlueprintPreview({ layout }) {
           <i style={{ background: beltColor }} />
           Belts & crossings
         </span>
+        {hasPipes && <span><i style={{ background: COLORS.pipe }} />Pipes</span>}
         <span>
           <i style={{ background: COLORS.inserter }} />
           Inserters

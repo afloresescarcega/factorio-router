@@ -79,6 +79,19 @@ test("CLI example plans electronic circuits on the electromagnetic plant in both
   }
 });
 
+test("CLI example plans processing units with fluid pipes in both layouts", () => {
+  const example = readFileSync(new URL("./examples/processing-units.json", import.meta.url), "utf8");
+  for (const args of [["--plan"], ["--plan", "--compact"]]) {
+    const result = run(example, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /passed schema/);
+    const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
+    assert.ok(blueprint.entities.some((entity) => entity.recipe === "processing-unit"));
+    assert.ok(blueprint.entities.some((entity) => entity.name === "pipe"));
+    assert.ok(blueprint.entities.some((entity) => entity.name === "pipe-to-ground"));
+  }
+});
+
 test("CLI accepts optional Helmod and keeps stdout clean even in debug mode", () => {
   for (const args of [[], ["--debug"]]) {
     const result = run(helmod, args);

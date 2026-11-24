@@ -132,3 +132,22 @@ test("Helmod placeholder beacons and empty module maps are not reported as ignor
   const plan = planHelmodString(encoded);
   expect(plan.warnings.join(" ")).not.toMatch(/were ignored/);
 });
+
+test("Helmod imports processing units with fluid supply and rejects assembling-machine-1", () => {
+  expect(() =>
+    planHelmodString(encode([["processing-unit", "assembling-machine-1", 2]])),
+  ).toThrow(/assembling machine 2 or higher/);
+
+  const encoded = encode([["processing-unit", "electromagnetic-plant", 2]]);
+  const plan = planHelmodString(encoded);
+  expect(plan.spaceAge).toBe(true);
+  expect(plan.outputs).toEqual([{ name: "processing-unit", rate: 13.5 }]);
+  expect(plan.inputs).toEqual([
+    { name: "electronic-circuit", rate: 180 },
+    { name: "advanced-circuit", rate: 18 },
+    { name: "sulfuric-acid", rate: 45, type: "fluid" },
+  ]);
+  const blueprint = decodeBlueprint(processHelmodString(encoded)).blueprint;
+  expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
+});

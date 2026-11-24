@@ -1,5 +1,5 @@
 import React, { useDeferredValue, useMemo, useState } from "react";
-import { RECIPES, MACHINES } from "./recipeCatalog.js";
+import { RECIPES, MACHINES, isFluidName } from "./recipeCatalog.js";
 import {
   BELTS,
   DEFAULT_CONFIG,
@@ -15,7 +15,14 @@ import { createLayout } from "./layout.js";
 import { encodeBlueprint } from "./blueprintFactory.js";
 import { planHelmodString } from "./main.js";
 import BlueprintPreview from "./BlueprintPreview.jsx";
-import { RATE_UNITS, convertRateUnit, numericRate, rateExceeds, rateScale } from "./transport.js";
+import {
+  RATE_UNITS,
+  convertRateUnit,
+  fluidRateScale,
+  numericRate,
+  rateExceeds,
+  rateScale,
+} from "./transport.js";
 import "./App.css";
 
 // Mirror Factorio's crafting-menu tabs so players find items where the game puts them.
@@ -64,6 +71,11 @@ const VIEWS = [
 
 function perSecond(rate) {
   return `${formatRate(rate)} ${rate === 1 ? "item" : "items"}/s`;
+}
+function inputUnitLabel(isFluid, rateUnit) {
+  if (isFluid) return rateUnit === "items/min" ? "fluid/min" : "fluid/s";
+  if (rateUnit === "belts") return "belts";
+  return rateUnit === "items/s" ? "/ sec" : "/ min";
 }
 const initialConfig = () => ({
   ...DEFAULT_CONFIG,
@@ -162,7 +174,9 @@ export default function App() {
       inputLimits: Object.fromEntries(
         Object.entries(config.inputLimits).map(([name, value]) => [
           name,
-          convertRate(value, oldInputScale, nextInputScale),
+          isFluidName(name)
+            ? value
+            : convertRate(value, oldInputScale, nextInputScale),
         ]),
       ),
       machineOverrides,
@@ -257,7 +271,7 @@ export default function App() {
           </span>
         </a>
         <span className="version-label">
-          FACTORIO 2.0{config.spaceAge ? " · SPACE AGE" : ""} · SOLID ITEMS
+          FACTORIO 2.0{config.spaceAge ? " · SPACE AGE" : ""} · BELTS &amp; PIPES
         </span>
       </header>
       <main>
@@ -515,19 +529,30 @@ export default function App() {
               </div>
               <p className="help">
                 Leave a limit blank for unlimited supply. Feed each listed item
-                at its marked belt entrance.
-                {config.inputStackSize > 1 && ` Supply all inputs in stacks of at least ${config.inputStackSize}.`}
+                at its marked belt entrance
+                {plan?.inputs.some((input) => input.type === "fluid")
+                  ? " and each fluid at its marked pipe entrance."
+                  : "."}
+                {config.inputStackSize > 1 && ` Supply all belt inputs in stacks of at least ${config.inputStackSize}.`}
                 {config.rateUnit === "belts" && ` 1 input belt = ${formatRate(inputScale / 60)} items/s at ${config.inputStackSize} item${config.inputStackSize === 1 ? "" : "s"} high.`}
               </p>
               {plan?.inputs.map((input) => {
-                const need = input.rate / inputScale;
+                const isFluid = input.type === "fluid";
+                const scale = isFluid ? fluidRateScale(config.rateUnit) : inputScale;
+                const need = input.rate / scale;
                 const limit = numericRate(config.inputLimits[input.name]);
                 const short = Number.isFinite(limit) && limit < need * (1 - 1e-9);
-                const unitLabel = config.rateUnit === "belts" ? "belts" : config.rateUnit === "items/s" ? "/ sec" : "/ min";
+                const unitLabel = inputUnitLabel(isFluid, config.rateUnit);
                 return (
                 <div className={`input-row ${short ? "over-limit" : ""}`} key={input.name}>
                   <label htmlFor={`supply-${input.name}`}>
                     {title(input.name)}
+                    {isFluid && (
+                      <>
+                        {" "}
+                        <span className="fluid-tag">pipe</span>
+                      </>
+                    )}
                     <small>
                       Needs {formatRate(need)} {unitLabel}
                       {short && <strong> · limit is {formatRate(need - limit)} short</strong>}
@@ -573,8 +598,8 @@ export default function App() {
               <form onSubmit={importLine}>
                 <p className="help">
                   Optional import for supported recipes and machine counts.
-                  Fluids, burners, miners, and modded machines are not
-                  supported.
+                  Fluid-output recipes, burners, miners, and modded machines are
+                  not supported.
                 </p>
                 <textarea
                   aria-label="Helmod export"
@@ -871,9 +896,10 @@ export default function App() {
             )}
             <p className="scope-note">
               {plan?.warnings.join(" ") ||
-                "Supports a curated catalog of vanilla solid-item recipes."}{" "}
-              Fluids, research bonuses, modules, beacons, quality, mining, and
-              other Space Age machines and recipes are outside this version.
+                "Supports a curated catalog of vanilla and Space Age crafting recipes, including piped fluid inputs."}{" "}
+              Fluid-output recipes, research bonuses, modules, beacons, quality,
+              mining, and other Space Age machines and recipes are outside this
+              version.
             </p>
           </div>
         </div>

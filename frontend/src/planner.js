@@ -1,6 +1,20 @@
-import { RECIPES, MACHINES } from "./recipeCatalog.js";
-import { BELTS, numericRate, rateExceeds, rateScale, transportSettings } from "./transport.js";
-export { BELTS } from "./transport.js";
+import {
+  RECIPES,
+  MACHINES,
+  fluidIngredients,
+  isFluidName,
+  solidIngredients,
+} from "./recipeCatalog.js";
+import {
+  BELTS,
+  PIPE_RATE,
+  fluidRateScale,
+  numericRate,
+  rateExceeds,
+  rateScale,
+  transportSettings,
+} from "./transport.js";
+export { BELTS, PIPE_RATE } from "./transport.js";
 
 export const recipeById = Object.fromEntries(
   RECIPES.map((recipe) => [recipe.id, recipe]),
@@ -51,18 +65,22 @@ export function factoryFor(recipe, config = {}) {
     canCraft(electronicsFactory, recipe)
   )
     return electronicsFactory;
-  return config.assembler ?? DEFAULT_CONFIG.assembler;
+  const assembler = config.assembler ?? DEFAULT_CONFIG.assembler;
+  if (canCraft(assembler, recipe)) return assembler;
+  if (fluidIngredients(recipe).length > 0) return "assembling-machine-2";
+  return assembler;
 }
 
 // Deliberately conservative, one-item-hand transfer budgets for this layout,
-// below the wiki's measured normal-quality belt transfer rates. These are
-// planning assumptions, not a tick simulation: https://wiki.factorio.com/Inserters
+// below the wiki's measured normal-quality belt transfer rates. Fluid inputs
+// arrive by pipe and do not use inserters. These are planning assumptions,
+// not a tick simulation: https://wiki.factorio.com/Inserters
 export function craftingCapacity(recipe, factory, outputStackSize = 1) {
   return Math.min(
     (MACHINES[factory].speed * 60) / recipe.time,
     (90 * outputStackSize) /
       (recipe.results[0].amount * (1 + productivityFor(recipe, factory))),
-    ...recipe.ingredients.map(
+    ...solidIngredients(recipe).map(
       (ingredient, index) => (index === 0 ? 90 : 45) / ingredient.amount,
     ),
   );
@@ -75,18 +93,25 @@ function positive(value, label, max = 100000) {
   return number;
 }
 
+function compatibleMachineHint(recipe) {
+  if (recipe.category === "smelting") return "an electric furnace";
+  if (fluidIngredients(recipe).length > 0)
+    return "an assembling machine 2 or higher";
+  return "an assembling machine";
+}
+
 export function validateUnit(unit, config = {}) {
   const recipe = recipeById[unit.recipe];
   if (!recipe)
     throw new Error(
-      `${title(String(unit.recipe))} is not supported. Choose a recipe from the solid-item catalog; fluids and modded recipes need a different layout.`,
+      `${title(String(unit.recipe))} is not supported. Choose a recipe from the supported catalog; fluid-output and modded recipes need a different layout.`,
     );
   const machine = MACHINES[unit.factory];
   if (machine?.spaceAge && config.spaceAge !== true)
     throw new Error(`Enable Space Age to use ${machine.name}.`);
   if (!machine || !canCraft(machine, recipe))
     throw new Error(
-      `${title(String(unit.factory))} cannot be used for ${recipe.name}. Use ${recipe.category === "smelting" ? "an electric furnace" : "an assembling machine"}.`,
+      `${title(String(unit.factory))} cannot be used for ${recipe.name}. Use ${compatibleMachineHint(recipe)}.`,
     );
   const count = positive(unit.count, `Machine count for ${recipe.name}`, 200);
   if (!Number.isInteger(count))
@@ -121,6 +146,34 @@ function orderedUnits(units) {
   return ordered;
 }
 
+function normalizeInput(input) {
+  if (input.type === "fluid" || isFluidName(input.name))
+    return { name: input.name, rate: input.rate, type: "fluid" };
+  return { name: input.name, rate: input.rate };
+}
+
+function buildTransportEntry(name, rate, inputs, belt, inputStackSize, outputStackSize) {
+  if (isFluidName(name)) {
+    return { name, rate, type: "fluid", pipeCapacity: PIPE_RATE };
+  }
+  // Only external supplies use the input stack assumption. Every local
+  // producer (including intermediates) uses the configured output inserter.
+  const stackSize = inputs.some((input) => input.name === name)
+    ? inputStackSize
+    : outputStackSize;
+  const laneCapacity = BELTS[belt].laneRate * stackSize;
+  return { name, rate, stackSize, laneCapacity, beltCapacity: laneCapacity * 2 };
+}
+
+function checkTransportIssue(entry, belt) {
+  if (entry.type === "fluid") {
+    if (!rateExceeds(entry.rate, entry.pipeCapacity)) return null;
+    return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout budgets ${formatRate(entry.pipeCapacity)}/min per pipe (1,200/s). Reduce the target.`;
+  }
+  if (!rateExceeds(entry.rate, entry.laneCapacity)) return null;
+  return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout allows ${formatRate(entry.laneCapacity)}/min per ${BELTS[belt].name.toLowerCase()} lane. Use a faster belt, increase the relevant stack size, or reduce the target. One material uses one lane (0.5 full belts); parallel belts are not generated.`;
+}
+
 export function finishPlan(units, inputs, outputs, config = {}) {
   const { belt, rateUnit, inputStackSize, outputStackSize, spaceAge } = transportSettings(config);
   const effectiveConfig = { ...config, spaceAge };
@@ -129,6 +182,7 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     throw new Error("Choose a standard or compact layout.");
   const maxMachines = Number(config.maxMachines ?? 200);
   const ordered = orderedUnits(units.map((unit) => validateUnit(unit, effectiveConfig)));
+  const normalizedInputs = inputs.map(normalizeInput);
   const machineCount = ordered.reduce((sum, unit) => sum + unit.count, 0);
   if (!machineCount) throw new Error("Add at least one production step.");
   const issues = [];
@@ -138,10 +192,13 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     issues.push(
       `This line needs ${machineCount} machines; your budget is ${maxMachines}. Reduce the target or increase the budget.`,
     );
-  for (const input of inputs) {
+  for (const input of normalizedInputs) {
     const raw = config.inputLimits?.[input.name];
     if (raw === undefined || raw === "") continue;
-    const limit = numericRate(raw) * rateScale(rateUnit, belt, inputStackSize);
+    const scale = input.type === "fluid"
+      ? fluidRateScale(rateUnit)
+      : rateScale(rateUnit, belt, inputStackSize);
+    const limit = numericRate(raw) * scale;
     if (!Number.isFinite(limit) || limit < 0) {
       issues.push(
         `Supply limit for ${title(input.name)} must be 0 or greater.`,
@@ -165,22 +222,18 @@ export function finishPlan(units, inputs, outputs, config = {}) {
         unit.crafts * result.amount * (1 + productivity),
       );
     }
-  for (const input of inputs) addRate(traffic, input.name, input.rate);
-  const transport = [...traffic].map(([name, rate]) => {
-    // Only external supplies use the input stack assumption. Every local
-    // producer (including intermediates) uses the configured output inserter.
-    const stackSize = inputs.some((input) => input.name === name) ? inputStackSize : outputStackSize;
-    const laneCapacity = BELTS[belt].laneRate * stackSize;
-    return { name, rate, stackSize, laneCapacity, beltCapacity: laneCapacity * 2 };
-  });
-  for (const { name, rate, laneCapacity } of transport)
-    if (rateExceeds(rate, laneCapacity))
-      issues.push(
-        `${title(name)} needs ${formatRate(rate)}/min; this layout allows ${formatRate(laneCapacity)}/min per ${BELTS[belt].name.toLowerCase()} lane. Use a faster belt, increase the relevant stack size, or reduce the target. One material uses one lane (0.5 full belts); parallel belts are not generated.`,
-      );
+  for (const input of normalizedInputs) addRate(traffic, input.name, input.rate);
+  const transport = [...traffic].map(([name, rate]) =>
+    buildTransportEntry(name, rate, normalizedInputs, belt, inputStackSize, outputStackSize),
+  );
+  for (const entry of transport) {
+    const issue = checkTransportIssue(entry, belt);
+    if (issue) issues.push(issue);
+  }
+  const hasFluids = normalizedInputs.some((input) => input.type === "fluid");
   return {
     units: ordered,
-    inputs,
+    inputs: normalizedInputs,
     outputs,
     machineCount,
     belt,
@@ -191,6 +244,8 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     issues,
     warnings: [
       `Sizing includes conservative inserter budgets (90 items/min for fast, 45 for long-handed${outputStackSize > 1 ? `, ${90 * outputStackSize} for stack outputs` : ""}). Normal quality, no modules. Actual belt loading can affect throughput; verify the line in Factorio.`,
+      ...(hasFluids
+        ? ["Fluid ingredients are supplied by pipe (budgeted at 1,200 fluid/s per pipe). Connect each marked fluid pipe entrance."] : []),
       ...(belt === "turbo-transport-belt"
         ? ["Green belts require Turbo transport belt research."] : []),
       ...(inputStackSize > 1 ? [`Supply every external input in stacks of at least ${inputStackSize} items. The blueprint does not stack incoming supplies.`] : []),
