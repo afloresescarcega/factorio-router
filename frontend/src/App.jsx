@@ -87,11 +87,21 @@ function formatBottleneckSummary(plan) {
       ? "per pipe"
       : `per ${BELTS[plan.belt].name.toLowerCase()} lane`;
   const extra = plan.bottlenecks.length - 1;
+  const materialWord = extra === 1 ? "material" : "materials";
   const extraText =
     extra > 0
-      ? ` (${extra} other ${extra === 1 ? "material" : "materials"} also over one lane)`
+      ? ` (${extra} other ${materialWord} also over one lane)`
       : "";
   return `${title(top.name)} needs ${formatRate(top.rate)}/min (${formatRate(capacity)}/min ${unit})${extraText}.`;
+}
+function inputSupplyHint(plan) {
+  if (plan?.sections > 1) {
+    return `Total demand is split evenly across ${plan.sections} parallel sections — feed each section's marked entrance on the west edge.`;
+  }
+  const fluidSuffix = plan?.inputs.some((input) => input.type === "fluid")
+    ? " and each fluid at its marked pipe entrance."
+    : ".";
+  return `Feed each listed item at its marked belt entrance${fluidSuffix}`;
 }
 const initialConfig = () => ({
   ...DEFAULT_CONFIG,
@@ -554,13 +564,7 @@ export default function App() {
               </div>
               <p className="help">
                 Leave a limit blank for unlimited supply.{" "}
-                {plan?.sections > 1
-                  ? `Total demand is split evenly across ${plan.sections} parallel sections — feed each section's marked entrance on the west edge.`
-                  : `Feed each listed item at its marked belt entrance${
-                      plan?.inputs.some((input) => input.type === "fluid")
-                        ? " and each fluid at its marked pipe entrance."
-                        : "."
-                    }`}
+                {inputSupplyHint(plan)}
                 {config.inputStackSize > 1 && ` Supply all belt inputs in stacks of at least ${config.inputStackSize}.`}
                 {config.rateUnit === "belts" && ` 1 input belt = ${formatRate(inputScale / 60)} items/s at ${config.inputStackSize} item${config.inputStackSize === 1 ? "" : "s"} high.`}
               </p>
@@ -876,7 +880,9 @@ export default function App() {
                                 (() => {
                                   const min = Math.min(...unit.sectionCounts);
                                   const max = Math.max(...unit.sectionCounts);
-                                  return ` · ${min === max ? min : `${min}–${max}`} per section`;
+                                  const perSection =
+                                    min === max ? String(min) : `${min}–${max}`;
+                                  return ` · ${perSection} per section`;
                                 })()}
                             </small>
                           </th>

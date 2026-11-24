@@ -222,6 +222,17 @@ function checkTransportIssue(entry, belt, reason = "") {
   return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout allows ${formatRate(entry.laneCapacity)}/min per ${BELTS[belt].name.toLowerCase()} lane.${suffix || " Use a faster belt, increase the relevant stack size, or reduce the target."}`;
 }
 
+function unsplitReason(entry, neededSections, hasEnoughMachines) {
+  if (!hasEnoughMachines) {
+    return `Splitting across ${neededSections} sections requires at least ${neededSections} machines per production step.`;
+  }
+  const hint =
+    entry.type === "fluid"
+      ? " Adjust the machine counts."
+      : " Adjust the machine counts, use a faster belt, or increase the stack size.";
+  return `Fixed machine counts cannot be split across ${neededSections} or more parallel sections without under-sizing a section.${hint}`;
+}
+
 export function finishPlan(units, inputs, outputs, config = {}) {
   const { belt, rateUnit, inputStackSize, outputStackSize, spaceAge } = transportSettings(config);
   const effectiveConfig = { ...config, spaceAge };
@@ -293,13 +304,7 @@ export function finishPlan(units, inputs, outputs, config = {}) {
         (unit) => unit.count >= neededSections,
       );
       for (const entry of rawTransport) {
-        const reason = hasEnoughMachines
-          ? `Fixed machine counts cannot be split across ${neededSections} or more parallel sections without under-sizing a section.${
-              entry.type === "fluid"
-                ? " Adjust the machine counts."
-                : " Adjust the machine counts, use a faster belt, or increase the stack size."
-            }`
-          : `Splitting across ${neededSections} sections requires at least ${neededSections} machines per production step.`;
+        const reason = unsplitReason(entry, neededSections, hasEnoughMachines);
         const issue = checkTransportIssue(entry, belt, reason);
         if (issue) issues.push(issue);
       }
@@ -481,8 +486,10 @@ export function planProduction(config) {
     const isAuto = override.count === undefined || override.count === "";
     let count = isAuto ? required : Number(override.count);
     if (isAuto && count > MAX_MACHINES) {
+      const sectionText =
+        sections > 1 ? ` across ${sections} parallel sections` : "";
       issues.push(
-        `${recipe.name} needs ${required} ${machine.name.toLowerCase()} machines${sections > 1 ? ` across ${sections} parallel sections` : ""} (maximum ${MAX_MACHINES}). Reduce the target or use faster machines or belts.`,
+        `${recipe.name} needs ${required} ${machine.name.toLowerCase()} machines${sectionText} (maximum ${MAX_MACHINES}). Reduce the target or use faster machines or belts.`,
       );
       count = MAX_MACHINES;
     } else if (!Number.isInteger(count) || count < 1 || count > MAX_MACHINES) {

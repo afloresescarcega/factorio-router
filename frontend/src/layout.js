@@ -77,29 +77,33 @@ function rightExtent({ unit, geometry }) {
   return Math.max(...extents);
 }
 
-// Keep recipe dependency order while packing the lanes and their splitter taps.
-// A spare tile between columns prevents a downstream splitter from occupying
-// the preceding column's tap or output feeder on a shared material bus.
-function arrange(plan, compact, columnLimit, fixedEdges = null) {
+function nextColumnX(previous, leftLane, compact) {
+  if (!previous) return 0;
+  const spacing = compact
+    ? rightExtent(previous) - leftLane + 2
+    : COLUMN_SPACING;
+  return previous.x + spacing;
+}
+
+function buildColumns(units, compact, columnLimit) {
   const columns = [];
-  for (const unit of plan.units)
+  for (const unit of units) {
     for (let remaining = unit.count; remaining > 0; remaining -= columnLimit) {
-      const previous = columns.at(-1);
       const geometry = machineGeometry(unit.factory, compact);
-      const solids = solidIngredients(unit);
-      const usedLanes = geometry.lanes.slice(0, solids.length);
+      const usedLanes = geometry.lanes.slice(0, solidIngredients(unit).length);
       const leftLane = usedLanes.length ? Math.min(...usedLanes) : -2;
-      const previousRight = previous ? rightExtent(previous) : 0;
       columns.push({
         unit,
         geometry,
         count: Math.min(columnLimit, remaining),
-        x: previous
-          ? previous.x +
-            (compact ? previousRight - leftLane + 2 : COLUMN_SPACING)
-          : 0,
+        x: nextColumnX(columns.at(-1), leftLane, compact),
       });
     }
+  }
+  return columns;
+}
+
+function buildBuses(plan, columns) {
   const items = [
     ...new Set(
       plan.units.flatMap((unit) =>
@@ -126,16 +130,23 @@ function arrange(plan, compact, columnLimit, fixedEdges = null) {
       column.x + column.geometry.outputBelt,
     );
   }
+  return buses;
+}
+
+function resolveHorizontalEdges(columns, buses, compact, fixedEdges) {
+  if (fixedEdges) {
+    return { leftEdge: fixedEdges.leftEdge, rightEdge: fixedEdges.rightEdge };
+  }
   const last = columns.at(-1);
-  const leftEdge = fixedEdges
-    ? fixedEdges.leftEdge
-    : compact
-      ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
-      : -12;
   const rightOfLast = rightExtent(last);
-  const rightEdge = fixedEdges
-    ? fixedEdges.rightEdge
-    : last.x + (compact ? rightOfLast + 2 : rightOfLast + 8);
+  const leftEdge = compact
+    ? Math.min(...buses.flatMap((bus) => bus.taps)) - 2
+    : -12;
+  const rightMargin = compact ? 2 : 8;
+  return { leftEdge, rightEdge: last.x + rightOfLast + rightMargin };
+}
+
+function assignBusSpans(buses, plan, leftEdge, rightEdge) {
   for (const bus of buses) {
     bus.external = plan.inputs.some((input) => input.name === bus.item);
     bus.exported = plan.outputs.some((output) => output.name === bus.item);
@@ -149,17 +160,35 @@ function arrange(plan, compact, columnLimit, fixedEdges = null) {
         : Math.max(...bus.taps.map((x) => x - 1), ...bus.feeders);
     }
   }
-  if (compact) {
-    // Disjoint material runs can share a horizontal band. Include each branch
-    // and a blank tile in its interval so separate materials never connect.
-    const ends = [];
-    for (const bus of [...buses].sort((a, b) => a.from - b.from || a.to - b.to)) {
-      let band = ends.findIndex((end) => end + 1 < bus.from);
-      if (band === -1) band = ends.length;
-      ends[band] = Math.max(bus.to, ...bus.taps);
-      bus.row = -5 - band * 4;
-    }
+}
+
+// Disjoint material runs can share a horizontal band. Include each branch
+// and a blank tile in its interval so separate materials never connect.
+function packCompactBuses(buses) {
+  const ends = [];
+  const sorted = [...buses].sort((a, b) => a.from - b.from || a.to - b.to);
+  for (const bus of sorted) {
+    let band = ends.findIndex((end) => end + 1 < bus.from);
+    if (band === -1) band = ends.length;
+    ends[band] = Math.max(bus.to, ...bus.taps);
+    bus.row = -5 - band * 4;
   }
+}
+
+// Keep recipe dependency order while packing the lanes and their splitter taps.
+// A spare tile between columns prevents a downstream splitter from occupying
+// the preceding column's tap or output feeder on a shared material bus.
+function arrange(plan, compact, columnLimit, fixedEdges = null) {
+  const columns = buildColumns(plan.units, compact, columnLimit);
+  const buses = buildBuses(plan, columns);
+  const { leftEdge, rightEdge } = resolveHorizontalEdges(
+    columns,
+    buses,
+    compact,
+    fixedEdges,
+  );
+  assignBusSpans(buses, plan, leftEdge, rightEdge);
+  if (compact) packCompactBuses(buses);
   const bottom = Math.max(
     ...columns.map(({ count, geometry }) => {
       const lastRow = (count - 1) * geometry.rowSpacing;
@@ -248,55 +277,273 @@ function heapPop(heap) {
   return top;
 }
 
-function findRelayPath(startTile, goalTile, occupied, { minX, maxX, minY, maxY }) {
+function reconstructRelayPath(node) {
+  const path = [];
+  for (let current = node; current.parent !== null; current = current.parent) {
+    path.push({ x: current.x, y: current.y });
+  }
+  return path.reverse();
+}
+
+function enqueueRelayNeighbors(current, goalTile, occupied, bounds, state) {
+  const { minX, maxX, minY, maxY } = bounds;
+  const { heap, bestG, closed } = state;
+  const nextG = current.g + 1;
+  for (const [ox, oy] of WIRE_REACH_OFFSETS) {
+    const tx = current.x + ox;
+    const ty = current.y + oy;
+    if (tx < minX || tx > maxX || ty < minY || ty > maxY) continue;
+    const key = `${tx},${ty}`;
+    if (closed.has(key) || occupied.has(key)) continue;
+    const prevG = bestG.get(key);
+    if (prevG !== undefined && prevG <= nextG) continue;
+    bestG.set(key, nextG);
+    const dist = Math.hypot(tx - goalTile.x, ty - goalTile.y);
+    heapPush(heap, {
+      x: tx,
+      y: ty,
+      g: nextG,
+      f: nextG + Math.max(0, dist - 9) / 9,
+      dx: Math.abs(tx - goalTile.x),
+      parent: current,
+    });
+  }
+}
+
+function findRelayPath(startTile, goalTile, occupied, bounds) {
   const startKey = `${startTile.x},${startTile.y}`;
   const startDist = Math.hypot(startTile.x - goalTile.x, startTile.y - goalTile.y);
-  const heap = [
-    {
-      x: startTile.x,
-      y: startTile.y,
-      g: 0,
-      f: Math.max(0, startDist - 9) / 9,
-      dx: Math.abs(startTile.x - goalTile.x),
-      parent: null,
-    },
-  ];
-  const bestG = new Map([[startKey, 0]]);
-  const closed = new Set();
-  while (heap.length) {
-    const current = heapPop(heap);
+  const state = {
+    heap: [
+      {
+        x: startTile.x,
+        y: startTile.y,
+        g: 0,
+        f: Math.max(0, startDist - 9) / 9,
+        dx: Math.abs(startTile.x - goalTile.x),
+        parent: null,
+      },
+    ],
+    bestG: new Map([[startKey, 0]]),
+    closed: new Set(),
+  };
+  while (state.heap.length) {
+    const current = heapPop(state.heap);
     const currentKey = `${current.x},${current.y}`;
-    if (closed.has(currentKey)) continue;
-    closed.add(currentKey);
+    if (state.closed.has(currentKey)) continue;
+    state.closed.add(currentKey);
     if (withinWireReach(current.x, current.y, goalTile.x, goalTile.y)) {
-      const path = [];
-      for (let node = current; node.parent !== null; node = node.parent) {
-        path.push({ x: node.x, y: node.y });
-      }
-      return path.reverse();
+      return reconstructRelayPath(current);
     }
-    const nextG = current.g + 1;
-    for (const [ox, oy] of WIRE_REACH_OFFSETS) {
-      const tx = current.x + ox;
-      const ty = current.y + oy;
-      if (tx < minX || tx > maxX || ty < minY || ty > maxY) continue;
-      const key = `${tx},${ty}`;
-      if (closed.has(key) || occupied.has(key)) continue;
-      const prevG = bestG.get(key);
-      if (prevG !== undefined && prevG <= nextG) continue;
-      bestG.set(key, nextG);
-      const dist = Math.hypot(tx - goalTile.x, ty - goalTile.y);
-      heapPush(heap, {
-        x: tx,
-        y: ty,
-        g: nextG,
-        f: nextG + Math.max(0, dist - 9) / 9,
-        dx: Math.abs(tx - goalTile.x),
-        parent: current,
-      });
-    }
+    enqueueRelayNeighbors(current, goalTile, occupied, bounds, state);
   }
   return null;
+}
+
+function crossesBus(bus, { x, from, to, ownRow }, compact, fluidMargin = false) {
+  if (bus.row === ownRow || bus.row - 1 < from || bus.row + 2 > to) return false;
+  if (!compact) return true;
+  if (x >= bus.from && x <= bus.to) return true;
+  return fluidMargin && bus.fluid && x >= bus.from - 1 && x <= bus.to + 1;
+}
+
+// Cross each bus separately; every tunnel spans just 2 hidden tiles. This
+// works for any number of buses and leaves room for a splitter's second tile.
+function placeVerticalBelt(ctx, buses, run) {
+  const { x, from, to, direction } = run;
+  const hidden = new Set();
+  const endpoints = new Map();
+  const entryType = direction === SOUTH ? "input" : "output";
+  const exitType = direction === SOUTH ? "output" : "input";
+  for (const bus of buses) {
+    if (crossesBus(bus, run, ctx.compact)) {
+      endpoints.set(bus.row - 1, entryType);
+      endpoints.set(bus.row + 2, exitType);
+      hidden.add(bus.row);
+      hidden.add(bus.row + 1);
+    }
+  }
+  for (let y = from; y <= to; y++) {
+    if (hidden.has(y)) continue;
+    if (endpoints.has(y)) ctx.underground(x, y, direction, endpoints.get(y));
+    else ctx.belt(x, y, direction);
+  }
+}
+
+function placeVerticalPipe(ctx, buses, run) {
+  const { x, from, to } = run;
+  const hidden = new Set();
+  const endpoints = new Map();
+  for (const bus of buses) {
+    if (crossesBus(bus, run, ctx.compact, true)) {
+      endpoints.set(bus.row - 1, NORTH);
+      endpoints.set(bus.row + 2, SOUTH);
+      hidden.add(bus.row);
+      hidden.add(bus.row + 1);
+    }
+  }
+  for (let y = from; y <= to; y++) {
+    if (hidden.has(y)) continue;
+    if (endpoints.has(y)) ctx.undergroundPipe(x, y, endpoints.get(y));
+    else ctx.pipe(x, y);
+  }
+}
+
+function placeBusRun(ctx, bus) {
+  const { from, to, fluid } = bus;
+  if (fluid) {
+    for (let x = from; x <= to; x++) ctx.pipe(x, bus.row);
+    return;
+  }
+  const splitters = new Set(bus.taps.map((x) => x - 1));
+  for (let x = from; x <= to; x++) {
+    if (splitters.has(x)) {
+      ctx.add(ctx.tier.splitter, x, bus.row + 0.5 + ctx.yShift, {
+        direction: EAST,
+        output_priority: "right",
+      });
+    } else {
+      ctx.belt(x, bus.row, EAST);
+    }
+  }
+}
+
+function placeBusBranches(ctx, buses, bus) {
+  if (bus.fluid) {
+    for (const x of bus.taps)
+      placeVerticalPipe(ctx, buses, { x, from: bus.row + 1, to: -2, ownRow: bus.row });
+    return;
+  }
+  const tapEndY = ctx.compact ? -3 : -4;
+  for (const x of bus.taps)
+    placeVerticalBelt(ctx, buses, {
+      x,
+      from: bus.row + 1,
+      to: tapEndY,
+      direction: SOUTH,
+      ownRow: bus.row,
+    });
+  for (const x of bus.feeders)
+    placeVerticalBelt(ctx, buses, {
+      x,
+      from: bus.row + 1,
+      to: -3,
+      direction: NORTH,
+      ownRow: bus.row,
+    });
+}
+
+function placeBuses(ctx, sectionPlan, arrangement, sectionNumber) {
+  const { buses, leftEdge, rightEdge } = arrangement;
+  const sectionTag = sectionNumber ? { section: sectionNumber } : {};
+  for (const bus of buses) {
+    placeBusRun(ctx, bus);
+    if (bus.external) {
+      ctx.annotations.push({
+        x: leftEdge,
+        y: bus.row + ctx.yShift,
+        item: bus.item,
+        kind: "input",
+        ...(bus.fluid ? { fluid: true } : {}),
+        ...sectionTag,
+        rate: sectionPlan.inputs.find((input) => input.name === bus.item).rate,
+      });
+    }
+    if (bus.exported) {
+      ctx.annotations.push({
+        x: rightEdge,
+        y: bus.row + ctx.yShift,
+        item: bus.item,
+        kind: "output",
+        ...sectionTag,
+        rate: sectionPlan.outputs.find((output) => output.name === bus.item).rate,
+      });
+    }
+    placeBusBranches(ctx, buses, bus);
+  }
+}
+
+function placeSolidLane(ctx, channel, lane, bend, endY) {
+  const startY = ctx.compact ? -2 : -3;
+  for (let y = startY; y < bend; y++) ctx.belt(channel, y, SOUTH);
+  const [step, direction] = lane > channel ? [1, EAST] : [-1, WEST];
+  for (let bx = channel; bx !== lane; bx += step) ctx.belt(bx, bend, direction);
+  for (let y = bend; y <= endY; y++) ctx.belt(lane, y, SOUTH);
+}
+
+function placeMachineRow(ctx, { x, unit }, geometry, index, rowConfig) {
+  const { solids, hasFluid, outputOffset } = rowConfig;
+  const y = index * geometry.rowSpacing;
+  ctx.add(unit.factory, x, y + ctx.yShift, machineOptions(unit, hasFluid));
+  if (hasFluid) {
+    const pipeY = y + geometry.fluidPipeOffset;
+    ctx.undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
+    ctx.undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
+  }
+  ctx.add(
+    ctx.outputInserterName,
+    x + geometry.outputInserter,
+    y + outputOffset + ctx.yShift,
+    ctx.outputInserterExtra,
+  );
+  if (solids[0])
+    ctx.add("fast-inserter", x - 2, y + ctx.yShift, { direction: WEST });
+  if (solids[1])
+    ctx.add("long-handed-inserter", x - 2, y + 1 + ctx.yShift, { direction: WEST });
+  if (solids[2])
+    ctx.add("long-handed-inserter", x + geometry.outputInserter, y + 1 + ctx.yShift, {
+      direction: EAST,
+    });
+  if (!ctx.compact) {
+    ctx.pole(x, y + geometry.poleGap);
+  } else if (index % 2 === 0) {
+    // Side poles cover two touching machine rows and their inserters.
+    ctx.pole(x - 2, y + geometry.poleGap);
+    ctx.pole(x + geometry.poleRight, y + geometry.poleRightGap);
+  }
+}
+
+function placeColumn(ctx, column, isLast, sectionTag) {
+  const { x, unit, count } = column;
+  const geometry = machineGeometry(unit.factory, ctx.compact);
+  const solids = solidIngredients(unit);
+  const hasFluid = fluidIngredients(unit).length > 0;
+  const endY = (count - 1) * geometry.rowSpacing + 1;
+  // Compact lanes connect directly to the bus; standard lanes fan out.
+  for (let i = 0; i < solids.length; i++) {
+    const bend = ctx.compact || i !== 0 ? -2 : -3;
+    placeSolidLane(ctx, x + geometry.channels[i], x + geometry.lanes[i], bend, endY);
+  }
+  const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
+  const outputEndY = (count - 1) * geometry.rowSpacing + outputOffset;
+  for (let y = -2; y <= outputEndY; y++)
+    ctx.belt(x + geometry.outputBelt, y, NORTH);
+  if (hasFluid) {
+    const fluidEndY = (count - 1) * geometry.rowSpacing + geometry.fluidPipeOffset;
+    for (let y = -1; y <= fluidEndY; y++)
+      ctx.pipe(x + geometry.fluidPipeLane, y);
+  }
+  const rowConfig = { solids, hasFluid, outputOffset };
+  for (let i = 0; i < count; i++) {
+    placeMachineRow(ctx, column, geometry, i, rowConfig);
+  }
+  ctx.pole(x - 2, -2);
+  ctx.pole(x + geometry.outputInserter, -2);
+  if (!ctx.compact && !isLast) ctx.pole(x + 10, -2);
+  ctx.annotations.push({
+    x: x + geometry.centerOffset - 0.5,
+    y: -1 + ctx.yShift,
+    item: unit.recipe,
+    kind: "machine",
+    ...sectionTag,
+    count,
+  });
+}
+
+function formatAnnotationLine(a) {
+  const sectionLabel = a.section ? ` (section ${a.section})` : "";
+  const fluidLabel = a.fluid ? " (pipe)" : "";
+  return `${a.kind}${sectionLabel}: ${title(a.item)}${fluidLabel} ${formatRate(a.rate)}/min at (${a.x + 0.5}, ${a.y + 0.5})`;
 }
 
 export function createLayout(
@@ -397,179 +644,34 @@ export function createLayout(
     plan.outputStackSize > 1 ? "stack-inserter" : "fast-inserter";
 
   function placeSection(sectionPlan, arrangement, yShift, sectionNumber) {
-    const { columns, buses, leftEdge, rightEdge } = arrangement;
     const sectionPoles = [];
     const startIndex = entities.length;
-    const belt = (x, y, direction) => add(plan.belt, x, y + yShift, { direction });
-    const underground = (x, y, direction, type) =>
-      add(tier.underground, x, y + yShift, { direction, type });
-    const pipe = (x, y) => add("pipe", x, y + yShift);
-    const undergroundPipe = (x, y, direction) =>
-      add("pipe-to-ground", x, y + yShift, { direction });
-    const pole = (x, y) => {
-      const p = add("medium-electric-pole", x, y + yShift);
-      poles.push(p);
-      sectionPoles.push(p);
-      return p;
+    const ctx = {
+      add,
+      tier,
+      compact,
+      yShift,
+      annotations,
+      outputInserterName,
+      outputInserterExtra,
+      belt: (x, y, direction) => add(plan.belt, x, y + yShift, { direction }),
+      underground: (x, y, direction, type) =>
+        add(tier.underground, x, y + yShift, { direction, type }),
+      pipe: (x, y) => add("pipe", x, y + yShift),
+      undergroundPipe: (x, y, direction) =>
+        add("pipe-to-ground", x, y + yShift, { direction }),
+      pole: (x, y) => {
+        const p = add("medium-electric-pole", x, y + yShift);
+        poles.push(p);
+        sectionPoles.push(p);
+        return p;
+      },
     };
-    // Cross each bus separately; every tunnel spans just 2 hidden tiles. This
-    // works for any number of buses and leaves room for a splitter's second tile.
-    function vertical(x, from, to, direction, ownRow) {
-      const hidden = new Set(),
-        endpoints = new Map();
-      for (const bus of buses)
-        if (
-          bus.row !== ownRow &&
-          bus.row - 1 >= from &&
-          bus.row + 2 <= to &&
-          (!compact || (x >= bus.from && x <= bus.to))
-        ) {
-          endpoints.set(bus.row - 1, direction === SOUTH ? "input" : "output");
-          endpoints.set(bus.row + 2, direction === SOUTH ? "output" : "input");
-          hidden.add(bus.row);
-          hidden.add(bus.row + 1);
-        }
-      for (let y = from; y <= to; y++) {
-        if (hidden.has(y)) continue;
-        if (endpoints.has(y)) underground(x, y, direction, endpoints.get(y));
-        else belt(x, y, direction);
-      }
-    }
-    function verticalPipe(x, from, to, ownRow) {
-      const hidden = new Set(),
-        endpoints = new Map();
-      for (const bus of buses) {
-        const crossesRow =
-          !compact ||
-          (x >= bus.from && x <= bus.to) ||
-          (bus.fluid && x >= bus.from - 1 && x <= bus.to + 1);
-        if (
-          bus.row !== ownRow &&
-          bus.row - 1 >= from &&
-          bus.row + 2 <= to &&
-          crossesRow
-        ) {
-          endpoints.set(bus.row - 1, NORTH);
-          endpoints.set(bus.row + 2, SOUTH);
-          hidden.add(bus.row);
-          hidden.add(bus.row + 1);
-        }
-      }
-      for (let y = from; y <= to; y++) {
-        if (hidden.has(y)) continue;
-        if (endpoints.has(y)) undergroundPipe(x, y, endpoints.get(y));
-        else pipe(x, y);
-      }
-    }
-    for (const bus of buses) {
-      const { external, exported, from, to, fluid } = bus;
-      if (fluid) {
-        for (let x = from; x <= to; x++) pipe(x, bus.row);
-      } else {
-        const splitters = new Set(bus.taps.map((x) => x - 1));
-        for (let x = from; x <= to; x++) {
-          if (splitters.has(x))
-            add(tier.splitter, x, bus.row + 0.5 + yShift, {
-              direction: EAST,
-              output_priority: "right",
-            });
-          else belt(x, bus.row, EAST);
-        }
-      }
-      if (external)
-        annotations.push({
-          x: leftEdge,
-          y: bus.row + yShift,
-          item: bus.item,
-          kind: "input",
-          ...(fluid ? { fluid: true } : {}),
-          ...(sectionNumber ? { section: sectionNumber } : {}),
-          rate: sectionPlan.inputs.find((input) => input.name === bus.item).rate,
-        });
-      if (exported)
-        annotations.push({
-          x: rightEdge,
-          y: bus.row + yShift,
-          item: bus.item,
-          kind: "output",
-          ...(sectionNumber ? { section: sectionNumber } : {}),
-          rate: sectionPlan.outputs.find((output) => output.name === bus.item).rate,
-        });
-      if (fluid) {
-        for (const x of bus.taps) verticalPipe(x, bus.row + 1, -2, bus.row);
-      } else {
-        for (const x of bus.taps)
-          vertical(x, bus.row + 1, compact ? -3 : -4, SOUTH, bus.row);
-        for (const x of bus.feeders) vertical(x, bus.row + 1, -3, NORTH, bus.row);
-      }
-    }
-    for (const { x, unit, count } of columns) {
-      const geometry = machineGeometry(unit.factory, compact);
-      const rowSpacing = geometry.rowSpacing;
-      const solids = solidIngredients(unit);
-      const hasFluid = fluidIngredients(unit).length > 0;
-      // Compact lanes connect directly to the bus; standard lanes fan out.
-      solids.forEach((ingredient, i) => {
-        const channel = x + geometry.channels[i],
-          lane = x + geometry.lanes[i];
-        const bend = compact || i !== 0 ? -2 : -3;
-        for (let y = compact ? -2 : -3; y < bend; y++)
-          belt(channel, y, SOUTH);
-        const step = lane > channel ? 1 : -1;
-        for (let bx = channel; bx !== lane; bx += step)
-          belt(bx, bend, step === 1 ? EAST : WEST);
-        for (let y = bend; y <= (count - 1) * rowSpacing + 1; y++)
-          belt(lane, y, SOUTH);
-      });
-      const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
-      const outputEndY = (count - 1) * rowSpacing + outputOffset;
-      for (let y = -2; y <= outputEndY; y++)
-        belt(x + geometry.outputBelt, y, NORTH);
-      if (hasFluid)
-        for (
-          let y = -1;
-          y <= (count - 1) * rowSpacing + geometry.fluidPipeOffset;
-          y++
-        )
-          pipe(x + geometry.fluidPipeLane, y);
-      for (let i = 0; i < count; i++) {
-        const y = i * rowSpacing;
-        add(unit.factory, x, y + yShift, machineOptions(unit, hasFluid));
-        if (hasFluid) {
-          const pipeY = y + geometry.fluidPipeOffset;
-          undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
-          undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
-        }
-        add(
-          outputInserterName,
-          x + geometry.outputInserter,
-          y + outputOffset + yShift,
-          outputInserterExtra,
-        );
-        if (solids[0])
-          add("fast-inserter", x - 2, y + yShift, { direction: WEST });
-        if (solids[1])
-          add("long-handed-inserter", x - 2, y + 1 + yShift, { direction: WEST });
-        if (solids[2])
-          add("long-handed-inserter", x + geometry.outputInserter, y + 1 + yShift, { direction: EAST });
-        if (!compact) pole(x, y + geometry.poleGap);
-        else if (i % 2 === 0) {
-          // Side poles cover two touching machine rows and their inserters.
-          pole(x - 2, y + geometry.poleGap);
-          pole(x + geometry.poleRight, y + geometry.poleRightGap);
-        }
-      }
-      pole(x - 2, -2);
-      pole(x + geometry.outputInserter, -2);
-      if (!compact && x < columns.at(-1).x) pole(x + 10, -2);
-      annotations.push({
-        x: x + geometry.centerOffset - 0.5,
-        y: -1 + yShift,
-        item: unit.recipe,
-        kind: "machine",
-        ...(sectionNumber ? { section: sectionNumber } : {}),
-        count,
-      });
+    placeBuses(ctx, sectionPlan, arrangement, sectionNumber);
+    const sectionTag = sectionNumber ? { section: sectionNumber } : {};
+    const lastX = arrangement.columns.at(-1).x;
+    for (const column of arrangement.columns) {
+      placeColumn(ctx, column, column.x === lastX, sectionTag);
     }
     let minY = Infinity,
       maxY = -Infinity;
@@ -679,10 +781,7 @@ export function createLayout(
       : []),
     ...annotations
       .filter((a) => a.kind !== "machine")
-      .map(
-        (a) =>
-          `${a.kind}${a.section ? ` (section ${a.section})` : ""}: ${title(a.item)}${a.fluid ? " (pipe)" : ""} ${formatRate(a.rate)}/min at (${a.x + 0.5}, ${a.y + 0.5})`,
-      ),
+      .map(formatAnnotationLine),
     ...plan.warnings,
   ].join("\n");
   const baseLabel =
