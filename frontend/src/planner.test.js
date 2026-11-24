@@ -3,6 +3,7 @@ import {
   craftingCapacity,
   DEFAULT_CONFIG,
   factoryFor,
+  finishPlan,
   planProduction,
   productivityFor,
   recipeById,
@@ -228,4 +229,74 @@ test("every production plan conserves materials at its target crafting rate", ()
   for (const item of result.outputs)
     balance.set(item.name, balance.get(item.name) - item.rate);
   for (const amount of balance.values()) expect(amount).toBeCloseTo(0, 8);
+});
+
+test("plans processing units with sulfuric-acid fluid supply and compatible machines", () => {
+  const result = plan({
+    outputs: [{ recipe: "processing-unit", rate: 15 }],
+    assembler: "assembling-machine-2",
+    belt: "express-transport-belt",
+  });
+  expect(result.issues).toEqual([]);
+  const pu = result.units.find((unit) => unit.recipe === "processing-unit");
+  expect(pu.factory).toBe("assembling-machine-2");
+  expect(pu.count).toBe(4);
+  expect(craftingCapacity(recipeById["processing-unit"], "assembling-machine-2")).toBe(4.5);
+  const acid = result.inputs.find((input) => input.name === "sulfuric-acid");
+  expect(acid).toEqual({ name: "sulfuric-acid", rate: 75, type: "fluid" });
+  expect(result.transport.find((entry) => entry.name === "sulfuric-acid")).toEqual({
+    name: "sulfuric-acid",
+    rate: 75,
+    type: "fluid",
+    pipeCapacity: 72000,
+  });
+  expect(result.warnings.join(" ")).toMatch(/supplied by pipe/);
+
+  // Assembling machine 1 cannot handle fluids: default falls back to AM2, explicit override is rejected.
+  expect(
+    factoryFor(recipeById["processing-unit"], {
+      ...DEFAULT_CONFIG,
+      assembler: "assembling-machine-1",
+    }),
+  ).toBe("assembling-machine-2");
+  expect(canCraft("assembling-machine-1", recipeById["processing-unit"])).toBe(false);
+  expect(canCraft("assembling-machine-2", recipeById["processing-unit"])).toBe(true);
+  expect(canCraft("electromagnetic-plant", recipeById["processing-unit"])).toBe(true);
+  expect(() =>
+    plan({
+      outputs: [{ recipe: "processing-unit", rate: 10 }],
+      machineOverrides: { "processing-unit": { factory: "assembling-machine-1" } },
+    }),
+  ).toThrow(/Select a compatible machine/);
+
+  // Space Age electromagnetic plant applies built-in 50% productivity to processing units.
+  const em = plan({
+    spaceAge: true,
+    electronicsMachine: "electromagnetic-plant",
+    belt: "express-transport-belt",
+    outputs: [{ recipe: "processing-unit", rate: 27 }],
+  });
+  expect(em.issues).toEqual([]);
+  const emPu = em.units.find((unit) => unit.recipe === "processing-unit");
+  expect(emPu.factory).toBe("electromagnetic-plant");
+  expect(emPu.crafts).toBeCloseTo(18);
+  expect(emPu.count).toBe(4);
+  expect(rate(em.inputs, "sulfuric-acid")).toBeCloseTo(90);
+
+  // Fluid supply limits are enforced and pipe capacity blocks extreme fluid rates without belt limits.
+  expect(
+    plan({
+      outputs: [{ recipe: "processing-unit", rate: 15 }],
+      belt: "express-transport-belt",
+      inputLimits: { "sulfuric-acid": 50 },
+    }).issues.join(" "),
+  ).toMatch(/Sulfuric acid needs 75\/min, but only 50\/min is available/);
+
+  const overPipe = finishPlan(
+    [{ recipe: "processing-unit", factory: "assembling-machine-2", count: 1, crafts: 1 }],
+    [{ name: "sulfuric-acid", rate: 72001, type: "fluid" }],
+    [{ name: "processing-unit", rate: 1 }],
+    DEFAULT_CONFIG,
+  );
+  expect(overPipe.issues.join(" ")).toMatch(/72,000\/min per pipe/);
 });

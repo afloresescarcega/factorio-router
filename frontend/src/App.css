@@ -694,6 +694,21 @@ th small {
   margin-top: 5px;
 }
 
+.fluid-tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--well-black);
+  box-shadow: var(--sunken);
+  color: #6cd6cf;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
 /* A supply limit below what the line needs: the field and its hint say so in place. */
 .input-row.over-limit small {
   color: var(--red-hi);

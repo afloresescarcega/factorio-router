@@ -1,0 +1,9 @@
+{
+  "outputs": [{ "recipe": "processing-unit", "rate": 15 }],
+  "assembler": "assembling-machine-2",
+  "belt": "express-transport-belt",
+  "rateUnit": "items/min",
+  "intermediates": true,
+  "fromOre": false,
+  "layoutMode": "compact"
+}

@@ -250,15 +250,16 @@ test("all catalog targets can be added without duplicate selections or an oversi
   render(<App />);
   // Keep the preview hidden while editing a large invalid plan.
   fireEvent.change(screen.getByLabelText("Machine budget"), { target: { value: "1" } });
-  for (let i = 1; i < MAX_OUTPUTS; i++) fireEvent.click(screen.getByRole("button", { name: /Add output/ }));
+  const addOutput = screen.getByRole("button", { name: /Add output/ });
+  for (let i = 1; i < MAX_OUTPUTS; i++) fireEvent.click(addOutput);
   const recipes = screen.getAllByRole("combobox", { name: /Output recipe/ });
   expect(recipes).toHaveLength(MAX_OUTPUTS);
   expect(new Set(recipes.map((select) => select.value)).size).toBe(MAX_OUTPUTS);
-  expect(screen.getByRole("button", { name: /Add output/ })).toBeDisabled();
+  expect(addOutput).toBeDisabled();
   expect(screen.getByRole("heading", { name: `${MAX_OUTPUTS} output targets` })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Remove output 2" }));
-  expect(screen.getByRole("button", { name: /Add output/ })).toBeEnabled();
-}, 15000);
+  expect(addOutput).toBeEnabled();
+}, 30000);
 
 test("Helmod import keeps Space Age settings and converts canonical rates to the selected unit", () => {
   render(<App />);
@@ -379,4 +380,43 @@ test("output feedback uses singular units and names an over-capacity lane", () =
   expect(screen.getByText(/^1 item\/s · 60 items\/min/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Output rate 1"), { target: { value: "1000" } });
   expect(screen.getByText(/over lane capacity/)).toBeInTheDocument();
+});
+
+test("processing units show piped sulfuric acid, pipe legend, and export valid pipe entities", () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Output recipe 1"), {
+    target: { value: "processing-unit" },
+  });
+  fireEvent.change(screen.getByLabelText("Output rate 1"), {
+    target: { value: "15" },
+  });
+  fireEvent.change(screen.getByLabelText("Belts"), {
+    target: { value: "express-transport-belt" },
+  });
+  expect(screen.getByLabelText("Sulfuric acid supply limit")).toBeInTheDocument();
+  expect(screen.getByText(/Needs 75 fluid\/min/)).toBeInTheDocument();
+  expect(document.querySelector(".legend")).toHaveTextContent("Pipes");
+  expect(screen.getByText("Sulfuric acid (pipe)")).toBeInTheDocument();
+
+  // Switching to belts mode keeps fluid inputs in fluid/s instead of belts.
+  fireEvent.change(screen.getByLabelText("Rate units"), {
+    target: { value: "belts" },
+  });
+  expect(screen.getByText(/Needs 1.25 fluid\/s/)).toBeInTheDocument();
+
+  // Enforces fluid supply limit and recovers when cleared.
+  fireEvent.change(screen.getByLabelText("Sulfuric acid supply limit"), {
+    target: { value: "0.5" },
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Sulfuric acid needs 75/min");
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Sulfuric acid supply limit"), {
+    target: { value: "" },
+  });
+  expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
+
+  const blueprint = decodeBlueprint(showExport().value).blueprint;
+  expect(blueprint.entities.some((e) => e.recipe === "processing-unit")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
 });

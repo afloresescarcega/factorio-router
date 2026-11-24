@@ -1,4 +1,6 @@
-// Rates are normalized to items/min before sizing or checking constraints.
+import { isFluidName } from "./recipeCatalog.js";
+
+// Rates are normalized to items/min (or fluid/min) before sizing or checking constraints.
 // Belt speeds and stack inserters: Wube factorio-data, tag 2.0.72,
 // space-age/prototypes/entity/{transport-belts,entities}.lua.
 export const BELTS = {
@@ -15,6 +17,9 @@ export const BELTS = {
     name: "Green belt (Space Age)", underground: "turbo-underground-belt", splitter: "turbo-splitter", laneRate: 1800,
   },
 };
+
+// Conservative single-pipe budget matching one normal-quality Factorio 2.0 pump (1,200 fluid/s).
+export const PIPE_RATE = 72000;
 
 export const RATE_UNITS = ["items/min", "items/s", "belts"];
 
@@ -61,23 +66,40 @@ export function rateScale(unit, belt, stackSize) {
   throw new Error("Choose items/min, items/s, or belts for rate units.");
 }
 
+export function fluidRateScale(unit) {
+  if (unit === "items/min") return 1;
+  // Fluids travel by pipe, not belt; in belts mode, display and enter them in fluid/s.
+  if (unit === "items/s" || unit === "belts") return 60;
+  throw new Error("Choose items/min, items/s, or belts for rate units.");
+}
+
 export function convertRateUnit(config, rateUnit) {
   const current = transportSettings(config);
-  const convert = (value, stackSize) => {
+  const convert = (value, fromScale, toScale) => {
     const number = numericRate(value);
     // Keep incomplete/invalid edits invalid when changing units.
     if (!Number.isFinite(number)) return value;
-    return number * rateScale(current.rateUnit, current.belt, stackSize) /
-      rateScale(rateUnit, current.belt, stackSize);
+    return (number * fromScale) / toScale;
   };
+  const fromOut = rateScale(current.rateUnit, current.belt, current.outputStackSize);
+  const toOut = rateScale(rateUnit, current.belt, current.outputStackSize);
+  const fromIn = rateScale(current.rateUnit, current.belt, current.inputStackSize);
+  const toIn = rateScale(rateUnit, current.belt, current.inputStackSize);
+  const fromFluid = fluidRateScale(current.rateUnit);
+  const toFluid = fluidRateScale(rateUnit);
   return {
     ...config,
     rateUnit,
     outputs: config.outputs.map((output) => ({
-      ...output, rate: convert(output.rate, current.outputStackSize),
+      ...output, rate: convert(output.rate, fromOut, toOut),
     })),
     inputLimits: Object.fromEntries(Object.entries(config.inputLimits || {}).map(
-      ([name, value]) => [name, convert(value, current.inputStackSize)],
+      ([name, value]) => [
+        name,
+        isFluidName(name)
+          ? convert(value, fromFluid, toFluid)
+          : convert(value, fromIn, toIn),
+      ],
     )),
   };
 }

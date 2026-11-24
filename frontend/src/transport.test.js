@@ -1,6 +1,6 @@
-import { RECIPES } from "./recipeCatalog.js";
+import { RECIPES, solidIngredients } from "./recipeCatalog.js";
 import { DEFAULT_CONFIG, MAX_OUTPUTS, craftingCapacity, formatRate, planProduction, recipeById } from "./planner.js";
-import { BELTS, RATE_UNITS, convertRateUnit, rateScale, transportSettings } from "./transport.js";
+import { BELTS, RATE_UNITS, convertRateUnit, fluidRateScale, rateScale, transportSettings } from "./transport.js";
 import { createLayout } from "./layout.js";
 
 const plan = (patch) => planProduction({ ...DEFAULT_CONFIG, ...patch });
@@ -73,7 +73,7 @@ test("stacked outputs do not increase external supply capacity or input inserter
   for (const recipe of RECIPES) {
     const factory = recipe.category === "smelting" ? "electric-furnace" : "assembling-machine-3";
     const crafts = craftingCapacity(recipe, factory, 4);
-    recipe.ingredients.forEach((item, i) => expect(crafts * item.amount).toBeLessThanOrEqual(i === 0 ? 90 : 45));
+    solidIngredients(recipe).forEach((item, i) => expect(crafts * item.amount).toBeLessThanOrEqual(i === 0 ? 90 : 45));
     expect(crafts * recipe.results[0].amount).toBeLessThanOrEqual(360);
   }
 });
@@ -158,4 +158,28 @@ test("all catalog outputs conserve materials and retain machine and target-count
   expect(plan({ ...config, maxMachines: 201 }).issues.join()).toMatch(/between 1 and 200/);
   expect(plan({ ...config, machineOverrides: { "copper-cable": { count: 200 } } }).issues.join()).toMatch(/budget/);
   expect(() => transportSettings({ belt: "__proto__" })).toThrow(/supported belt/);
+  expect(() => fluidRateScale("items/hour")).toThrow(/rate units/);
+});
+
+test("fluid supply limits convert between fluid/min and fluid/s without belt scaling", () => {
+  let config = {
+    ...DEFAULT_CONFIG,
+    spaceAge: true,
+    belt: "turbo-transport-belt",
+    inputStackSize: 4,
+    outputStackSize: 4,
+    outputs: outputs("processing-unit", 60),
+    inputLimits: { "sulfuric-acid": 300, "plastic-bar": 240 },
+  };
+  const before = plan(config);
+  expect(before.issues).toEqual([]);
+  config = convertRateUnit(config, "items/s");
+  expect(config.inputLimits["sulfuric-acid"]).toBe(5);
+  expect(plan(config)).toEqual(before);
+  config = convertRateUnit(config, "belts");
+  expect(config.inputLimits["sulfuric-acid"]).toBe(5);
+  expect(plan(config)).toEqual(before);
+  config = convertRateUnit(config, "items/min");
+  expect(config.inputLimits["sulfuric-acid"]).toBe(300);
+  expect(plan(config)).toEqual(before);
 });

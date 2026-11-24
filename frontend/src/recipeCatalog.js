@@ -8,11 +8,12 @@
  *
  * `time` is the prototype's energy_required value in seconds.  Factorio
  * recipes without an explicit energy_required use the 0.5 second default.
- * This subset keeps solid-item, single-result recipes with no more than three
- * item ingredient types and only the crafting, electronics, pressing, and
- * smelting categories supported
- * by MACHINES below.  Dependencies that are outside this subset (for
- * example plastic-bar and explosives) are kept as their vanilla item names.
+ * This subset keeps single-solid-result recipes with up to three ingredients
+ * (at most one fluid input and two solid inputs, or up to three solid inputs)
+ * in the crafting, crafting-with-fluid, electronics, electronics-with-fluid,
+ * pressing, and smelting categories supported by MACHINES below.
+ * Dependencies that are outside this subset (for example plastic-bar,
+ * explosives, and sulfuric-acid) are kept as their vanilla item or fluid names.
  */
 
 export const RECIPES = [
@@ -101,6 +102,19 @@ export const RECIPES = [
       { name: 'copper-cable', amount: 4 },
     ],
     results: [{ name: 'advanced-circuit', amount: 1 }],
+  },
+  {
+    id: 'processing-unit',
+    name: 'Processing unit',
+    category: 'electronics-with-fluid',
+    allowProductivity: true,
+    time: 10,
+    ingredients: [
+      { name: 'electronic-circuit', amount: 20 },
+      { name: 'advanced-circuit', amount: 2 },
+      { name: 'sulfuric-acid', amount: 5, type: 'fluid' },
+    ],
+    results: [{ name: 'processing-unit', amount: 1 }],
   },
 
   // Science packs
@@ -537,7 +551,13 @@ export const MACHINES = {
   'assembling-machine-2': {
     name: 'Assembling machine 2',
     speed: 0.75,
-    categories: ['crafting', 'electronics', 'pressing'],
+    categories: [
+      'crafting',
+      'crafting-with-fluid',
+      'electronics',
+      'electronics-with-fluid',
+      'pressing',
+    ],
     size: 3,
     productivity: 0,
     spaceAge: false,
@@ -545,7 +565,13 @@ export const MACHINES = {
   'assembling-machine-3': {
     name: 'Assembling machine 3',
     speed: 1.25,
-    categories: ['crafting', 'electronics', 'pressing'],
+    categories: [
+      'crafting',
+      'crafting-with-fluid',
+      'electronics',
+      'electronics-with-fluid',
+      'pressing',
+    ],
     size: 3,
     productivity: 0,
     spaceAge: false,
@@ -562,10 +588,22 @@ export const MACHINES = {
     name: 'Electromagnetic plant',
     speed: 2,
     productivity: 0.5,
-    categories: ['electronics'],
+    categories: ['electronics', 'electronics-with-fluid'],
     size: 4,
     spaceAge: true,
   },
 };
+
+export const isFluidIngredient = (entry) => entry?.type === 'fluid';
+export const solidIngredients = (recipe) =>
+  (recipe?.ingredients ?? []).filter((entry) => !isFluidIngredient(entry));
+export const fluidIngredients = (recipe) =>
+  (recipe?.ingredients ?? []).filter(isFluidIngredient);
+export const FLUID_NAMES = new Set(
+  RECIPES.flatMap((recipe) =>
+    recipe.ingredients.filter(isFluidIngredient).map((entry) => entry.name),
+  ),
+);
+export const isFluidName = (name) => FLUID_NAMES.has(name);
 
 export default { RECIPES, MACHINES };
