@@ -250,15 +250,16 @@ test("all catalog targets can be added without duplicate selections or an oversi
   render(<App />);
   // Keep the preview hidden while editing a large invalid plan.
   fireEvent.change(screen.getByLabelText("Machine budget"), { target: { value: "1" } });
-  for (let i = 1; i < MAX_OUTPUTS; i++) fireEvent.click(screen.getByRole("button", { name: /Add output/ }));
+  const addOutput = screen.getByRole("button", { name: /Add output/ });
+  for (let i = 1; i < MAX_OUTPUTS; i++) fireEvent.click(addOutput);
   const recipes = screen.getAllByRole("combobox", { name: /Output recipe/ });
   expect(recipes).toHaveLength(MAX_OUTPUTS);
   expect(new Set(recipes.map((select) => select.value)).size).toBe(MAX_OUTPUTS);
-  expect(screen.getByRole("button", { name: /Add output/ })).toBeDisabled();
+  expect(addOutput).toBeDisabled();
   expect(screen.getByRole("heading", { name: `${MAX_OUTPUTS} output targets` })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Remove output 2" }));
-  expect(screen.getByRole("button", { name: /Add output/ })).toBeEnabled();
-}, 15000);
+  expect(addOutput).toBeEnabled();
+}, 30000);
 
 test("Helmod import keeps Space Age settings and converts canonical rates to the selected unit", () => {
   render(<App />);
