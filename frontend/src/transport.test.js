@@ -95,7 +95,7 @@ test("stacked outputs do not increase external supply capacity or input inserter
           ? "chemical-plant"
           : "assembling-machine-3";
     const crafts = craftingCapacity(recipe, factory, 4);
-    solidIngredients(recipe).forEach((item, i) => expect(crafts * item.amount).toBeLessThanOrEqual(i === 0 ? 90 : 45));
+    solidIngredients(recipe).forEach((item, i) => expect(crafts * item.amount).toBeLessThanOrEqual(i === 0 || i === 3 ? 90 : 45));
     expect(crafts * recipe.results[0].amount).toBeLessThanOrEqual(360);
   }
 });

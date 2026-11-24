@@ -1,0 +1,16 @@
+{
+  "outputs": [
+    { "recipe": "automation-science-pack", "rate": 15 },
+    { "recipe": "logistic-science-pack", "rate": 15 },
+    { "recipe": "military-science-pack", "rate": 15 },
+    { "recipe": "chemical-science-pack", "rate": 15 },
+    { "recipe": "production-science-pack", "rate": 15 },
+    { "recipe": "utility-science-pack", "rate": 15 }
+  ],
+  "assembler": "assembling-machine-3",
+  "belt": "express-transport-belt",
+  "intermediates": true,
+  "fromOre": true,
+  "layoutMode": "compact",
+  "maxMachines": 400
+}

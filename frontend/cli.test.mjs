@@ -109,6 +109,26 @@ test("CLI example plans processing units with fluid pipes in both layouts", () =
   }
 });
 
+test("CLI example plans all six vanilla science packs in both layouts", () => {
+  const example = readFileSync(new URL("./examples/all-science.json", import.meta.url), "utf8");
+  for (const args of [["--plan"], ["--plan", "--compact"]]) {
+    const result = run(example, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /passed schema/);
+    const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
+    for (const pack of [
+      "automation-science-pack",
+      "logistic-science-pack",
+      "military-science-pack",
+      "chemical-science-pack",
+      "production-science-pack",
+      "utility-science-pack",
+    ]) {
+      assert.ok(blueprint.entities.some((entity) => entity.recipe === pack), pack);
+    }
+  }
+});
+
 test("CLI accepts optional Helmod and keeps stdout clean even in debug mode", () => {
   for (const args of [[], ["--debug"]]) {
     const result = run(helmod, args);

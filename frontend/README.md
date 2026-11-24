@@ -34,6 +34,7 @@ node cli.mjs --compact < helmod-export.txt > compact-blueprint.txt
 node cli.mjs --plan < examples/em-circuits.json
 node cli.mjs --plan --compact < examples/em-circuits.json
 node cli.mjs --plan < examples/processing-units.json
+node cli.mjs --plan --compact < examples/all-science.json
 ```
 
 The app's **Compact layout** option and the CLI's `--compact` flag use the same
