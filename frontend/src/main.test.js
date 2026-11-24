@@ -59,9 +59,43 @@ test("rejects unknown recipes, incompatible machines, and unbounded counts", () 
   ).toThrow(/Invalid machine count/);
   expect(() =>
     planHelmodString(
-      encode([["iron-gear-wheel", "assembling-machine-1", 201]]),
+      encode([["iron-gear-wheel", "assembling-machine-1", 1001]]),
     ),
   ).toThrow(/Invalid machine count/);
+});
+
+test("Helmod imports that exceed a single belt lane auto-split into parallel sections", () => {
+  const encoded = encode([["copper-cable", "assembling-machine-2", 10]]);
+  const plan = planHelmodString(encoded);
+  expect(plan.issues).toEqual([]);
+  expect(plan.sections).toBe(2);
+  expect(plan.units[0].sectionCounts).toEqual([5, 5]);
+  const blueprint = decodeBlueprint(processHelmodString(encoded)).blueprint;
+  expect(
+    blueprint.entities.filter((e) => e.recipe === "copper-cable"),
+  ).toHaveLength(10);
+
+  // Odd fixed counts do not split unevenly into under-sized slices (e.g. 5/4);
+  // 9 machines split cleanly into 3 equal sections of 3 machines (270/min each).
+  const odd = encode([["copper-cable", "assembling-machine-2", 9]]);
+  const oddPlan = planHelmodString(odd);
+  expect(oddPlan.issues).toEqual([]);
+  expect(oddPlan.sections).toBe(3);
+  expect(oddPlan.units[0].sectionCounts).toEqual([3, 3, 3]);
+  expect(oddPlan.transport.find((entry) => entry.name === "copper-cable").perSectionRate).toBe(270);
+  const oddLayout = createLayout(oddPlan);
+  const oddOutputs = oddLayout.annotations.filter((a) => a.kind === "output");
+  expect(oddOutputs).toHaveLength(3);
+  expect(oddOutputs.every((a) => a.rate === 270)).toBe(true);
+
+  // Coprime fixed counts that cannot split evenly across sections report an issue.
+  const coprime = encode([
+    ["copper-cable", "assembling-machine-2", 9],
+    ["electronic-circuit", "assembling-machine-2", 10],
+  ]);
+  const coprimePlan = planHelmodString(coprime);
+  expect(coprimePlan.issues.join(" ")).toMatch(/cannot be split across 2 or more parallel sections/i);
+  expect(() => processHelmodString(coprime)).toThrow(/cannot be split/i);
 });
 
 test("does not silently export an underproduced intermediate", () => {

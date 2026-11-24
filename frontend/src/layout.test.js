@@ -152,15 +152,28 @@ function inspect(layout) {
     }
     return seen;
   }
-  const inputsByItem = new Map();
+  const sectionCount = layout.sections ?? 1;
+  const sectionOfY = (y) => {
+    if (sectionCount <= 1) return 1;
+    const match = layout.sectionBounds.find(
+      (band) => y >= band.top - 0.5 && y <= band.bottom + 0.5,
+    );
+    expect(match, `entity at y=${y} outside all section bounds`).toBeDefined();
+    return match.section;
+  };
+  const inputsByKey = new Map();
+  const addSource = (section, item, entity) => {
+    const mapKey = `${section}:${item}`;
+    const starts = inputsByKey.get(mapKey) || [];
+    starts.push(entity);
+    inputsByKey.set(mapKey, starts);
+  };
   for (const annotation of layout.annotations.filter(
     (a) => a.kind === "input" && !a.fluid,
   )) {
     const input = tiles.get(key(annotation.x + 0.5, annotation.y + 0.5));
     expect(isTransport(input), `missing input ${annotation.item}`).toBe(true);
-    const starts = inputsByItem.get(annotation.item) || [];
-    starts.push(input);
-    inputsByItem.set(annotation.item, starts);
+    addSource(annotation.section ?? 1, annotation.item, input);
   }
   const requiredPickups = [];
   for (const entity of entities.filter((e) => e.name.includes("inserter"))) {
@@ -178,41 +191,49 @@ function inspect(layout) {
     ).toBeDefined();
     expect(drop, `missing inserter drop ${entity.entity_number}`).toBeDefined();
     const machine = MACHINES[pickup.name] ? pickup : drop;
+    const section = sectionOfY(machine.position.y);
     const recipe = layout.annotations.find(
-      (a) => a.kind === "machine" && a.x + 0.5 === machine.position.x,
+      (a) =>
+        a.kind === "machine" &&
+        (a.section ?? 1) === section &&
+        a.x + 0.5 === machine.position.x,
     )?.item;
     expect(recipe).toBeDefined();
     if (machine === pickup) {
-      const starts = inputsByItem.get(recipe) || [];
-      starts.push(drop);
-      inputsByItem.set(recipe, starts);
+      addSource(section, recipe, drop);
     } else {
       const data = RECIPES.find((r) => r.id === recipe);
       const solids = solidIngredients(data);
       const index =
         entity.position.x > machine.position.x ? 2 : reach === 2 ? 1 : 0;
-      requiredPickups.push({ item: solids[index].name, pickup });
+      requiredPickups.push({ section, item: solids[index].name, pickup });
     }
   }
-  for (const { item } of requiredPickups)
-    expect(inputsByItem.has(item), `missing material source ${item}`).toBe(true);
-  for (const [item, starts] of inputsByItem) {
-    // Each producer must deliver, including every wrapped producer column.
-    // Taking the union of all producers could hide a disconnected output belt.
+  for (const { section, item } of requiredPickups)
+    expect(
+      inputsByKey.has(`${section}:${item}`),
+      `missing material source ${item} in section ${section}`,
+    ).toBe(true);
+  for (const [sourceKey, starts] of inputsByKey) {
+    const [sectionStr, item] = sourceKey.split(":");
+    const section = Number(sectionStr);
+    // Each producer must deliver within its own section, including every
+    // wrapped producer column, and never cross-contaminate another section.
     for (const start of starts) {
       const reachableTiles = reachable([start]);
       for (const required of requiredPickups)
         expect(
           reachableTiles.has(required.pickup.entity_number),
-          `${item} from ${start.entity_number} route to ${required.item}`,
-        ).toBe(required.item === item);
+          `section ${section} ${item} from ${start.entity_number} route to section ${required.section} ${required.item}`,
+        ).toBe(required.section === section && required.item === item);
       for (const output of layout.annotations.filter((a) => a.kind === "output")) {
         const exit = tiles.get(key(output.x + 0.5, output.y + 0.5));
         expect(isTransport(exit), `missing output ${output.item}`).toBe(true);
+        const outputSection = output.section ?? 1;
         expect(
           reachableTiles.has(exit.entity_number),
-          `${item} from ${start.entity_number} route to final output ${output.item}`,
-        ).toBe(output.item === item);
+          `section ${section} ${item} from ${start.entity_number} route to section ${outputSection} final output ${output.item}`,
+        ).toBe(outputSection === section && output.item === item);
       }
     }
   }
@@ -253,13 +274,13 @@ function inspect(layout) {
       pairedPipes.has(entity.entity_number),
       `pipe-to-ground not symmetrically paired at ${entity.position.x},${entity.position.y}`,
     ).toBe(true);
-  const fluidInputsByName = new Map();
+  const fluidInputsByKey = new Map();
   for (const annotation of layout.annotations.filter(
     (a) => a.kind === "input" && a.fluid,
   )) {
     const entry = tiles.get(key(annotation.x + 0.5, annotation.y + 0.5));
     expect(isPipe(entry), `missing fluid pipe input ${annotation.item}`).toBe(true);
-    fluidInputsByName.set(annotation.item, entry);
+    fluidInputsByKey.set(`${annotation.section ?? 1}:${annotation.item}`, entry);
   }
   const requiredFluidPorts = [];
   for (const machine of entities.filter((e) => MACHINES[e.name])) {
@@ -279,7 +300,11 @@ function inspect(layout) {
       isPipe(pipeTile) && aboveGroundDirs(pipeTile).includes(opposite(portDir)),
       `missing connected pipe for ${machine.name} (${machine.recipe}) at ${machine.position.x},${machine.position.y}`,
     ).toBe(true);
-    requiredFluidPorts.push({ fluid: fluids[0].name, pipe: pipeTile });
+    requiredFluidPorts.push({
+      section: sectionOfY(machine.position.y),
+      fluid: fluids[0].name,
+      pipe: pipeTile,
+    });
   }
   const pipeReachable = (start) => {
     const seen = new Set(),
@@ -292,9 +317,14 @@ function inspect(layout) {
     }
     return seen;
   };
-  for (const { fluid } of requiredFluidPorts)
-    expect(fluidInputsByName.has(fluid), `missing fluid source ${fluid}`).toBe(true);
-  for (const [fluid, start] of fluidInputsByName) {
+  for (const { section, fluid } of requiredFluidPorts)
+    expect(
+      fluidInputsByKey.has(`${section}:${fluid}`),
+      `missing fluid source ${fluid} in section ${section}`,
+    ).toBe(true);
+  for (const [fluidKey, start] of fluidInputsByKey) {
+    const [sectionStr, fluid] = fluidKey.split(":");
+    const section = Number(sectionStr);
     const network = pipeReachable(start);
     const xs = [...network].map((id) => entities[id - 1].position.x);
     const ys = [...network].map((id) => entities[id - 1].position.y);
@@ -303,8 +333,8 @@ function inspect(layout) {
     for (const port of requiredFluidPorts)
       expect(
         network.has(port.pipe.entity_number),
-        `fluid ${fluid} route to ${port.fluid}`,
-      ).toBe(port.fluid === fluid);
+        `section ${section} fluid ${fluid} route to section ${port.section} ${port.fluid}`,
+      ).toBe(port.section === section && port.fluid === fluid);
   }
   const poles = entities.filter((e) => e.name === "medium-electric-pole");
   for (const powered of entities.filter(
@@ -669,16 +699,33 @@ test("compact mode is opt-in, deterministic, and does not mutate the plan", () =
   expect(plan).toEqual(original);
 });
 
-test("compact mode rejects production plans with insufficient belt capacity", () => {
-  const plan = planProduction({
+test("compact mode rejects production plans with constraint issues and auto-batches yellow-belt splitter lines", () => {
+  const infeasible = planProduction({
+    ...DEFAULT_CONFIG,
+    ...suppliedSplitterConfig,
+    maxMachines: 10,
+  });
+  expect(infeasible.issues.length).toBeGreaterThan(0);
+  expect(() => createLayout(infeasible, { compact: true })).toThrow(
+    infeasible.issues.join(" "),
+  );
+
+  const yellowPlan = planProduction({
     ...DEFAULT_CONFIG,
     ...suppliedSplitterConfig,
     belt: "transport-belt",
   });
-  expect(plan.issues.length).toBeGreaterThan(0);
-  expect(() => createLayout(plan, { compact: true })).toThrow(
-    plan.issues.join(" "),
-  );
+  expect(yellowPlan.issues).toEqual([]);
+  expect(yellowPlan.sections).toBe(3);
+  const yellowCompact = createLayout(yellowPlan, { compact: true });
+  const yellowStandard = createLayout(yellowPlan, { compact: false });
+  expect(yellowCompact.sections).toBe(3);
+  expect(footprint(yellowCompact)).toBeLessThan(footprint(yellowStandard));
+  inspect(yellowCompact);
+  inspect(yellowStandard);
+  expect(
+    validateBlueprintString(encodeBlueprint(yellowCompact.blueprint)),
+  ).toEqual({ ok: true, errors: [] });
 });
 
 test("neighboring three-ingredient columns preserve their shared ingredient branches", () => {
@@ -838,6 +885,65 @@ test.each(Object.keys(BELTS))(
       expect(machineCounts(layout)).toEqual(machineCounts(standard));
       expect(footprint(layout)).toBeLessThanOrEqual(footprint(standard));
       inspect(layout);
+    }
+  },
+);
+
+test.each(["standard", "compact"])(
+  "%s parallel sections isolate transport and fluids per section while sharing one connected power grid",
+  (layoutMode) => {
+    const scenarios = [
+      // Exact screenshot scenario: 7/s electronic circuits on red belt from ore (2 sections).
+      {
+        outputs: [{ recipe: "electronic-circuit", rate: 7 }],
+        rateUnit: "items/s",
+        belt: "fast-transport-belt",
+        fromOre: true,
+        expectedSections: 2,
+      },
+      // Input saturation: 1 full red belt of iron gear wheels needs 2 lanes of iron plates.
+      {
+        outputs: [{ recipe: "iron-gear-wheel", rate: 15 }],
+        rateUnit: "items/s",
+        belt: "fast-transport-belt",
+        expectedSections: 2,
+      },
+      // Multi-belt output saturation: 1.5 yellow belts (3 lanes) of copper cable.
+      {
+        outputs: [{ recipe: "copper-cable", rate: 1.5 }],
+        rateUnit: "belts",
+        belt: "transport-belt",
+        expectedSections: 3,
+      },
+      // Multi-fluid + EM plants + odd manual machine overrides across sections.
+      {
+        spaceAge: true,
+        electronicsMachine: "electromagnetic-plant",
+        belt: "transport-belt",
+        outputs: [{ recipe: "processing-unit", rate: 15 }],
+        fromOre: true,
+        machineOverrides: { "copper-cable": { count: 9 } },
+        expectedSections: 2,
+      },
+    ];
+    for (const { expectedSections, ...scenario } of scenarios) {
+      const layout = build({ ...scenario, layoutMode });
+      expect(layout.sections).toBe(expectedSections);
+      expect(layout.sectionBounds).toHaveLength(expectedSections);
+      // All west inputs align on the same x edge, and all east outputs align on the same x edge.
+      const inputXs = new Set(
+        layout.annotations.filter((a) => a.kind === "input").map((a) => a.x),
+      );
+      const outputXs = new Set(
+        layout.annotations.filter((a) => a.kind === "output").map((a) => a.x),
+      );
+      expect(inputXs.size).toBe(1);
+      expect(outputXs.size).toBe(1);
+      expect(layout.blueprint.blueprint.label).toContain(`(${expectedSections}×)`);
+      inspect(layout);
+      const encoded = encodeBlueprint(layout.blueprint);
+      expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
+      expect(decodeBlueprint(encoded)).toEqual(layout.blueprint);
     }
   },
 );

@@ -12,14 +12,16 @@ import {
   numericRate,
   rateExceeds,
   rateScale,
+  requiredLanes,
   transportSettings,
 } from "./transport.js";
-export { BELTS, PIPE_RATE } from "./transport.js";
+export { BELTS, PIPE_RATE, requiredLanes } from "./transport.js";
 
 export const recipeById = Object.fromEntries(
   RECIPES.map((recipe) => [recipe.id, recipe]),
 );
 export const MAX_OUTPUTS = RECIPES.length;
+export const MAX_MACHINES = 1000;
 export const DEFAULT_CONFIG = {
   outputs: [{ recipe: "electronic-circuit", rate: 60 }],
   assembler: "assembling-machine-2",
@@ -115,7 +117,7 @@ export function validateUnit(unit, config = {}) {
     throw new Error(
       `${title(String(unit.factory))} cannot be used for ${recipe.name}. Use ${compatibleMachineHint(recipe)}.`,
     );
-  const count = positive(unit.count, `Machine count for ${recipe.name}`, 200);
+  const count = positive(unit.count, `Machine count for ${recipe.name}`, MAX_MACHINES);
   if (!Number.isInteger(count))
     throw new Error(`Machine count for ${recipe.name} must be a whole number.`);
   return {
@@ -124,6 +126,12 @@ export function validateUnit(unit, config = {}) {
     ingredients: recipe.ingredients,
     results: recipe.results,
   };
+}
+
+export function splitCount(total, sections) {
+  const base = Math.floor(total / sections);
+  const remainder = total % sections;
+  return Array.from({ length: sections }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
 function orderedUnits(units) {
@@ -156,7 +164,13 @@ function normalizeInput(input) {
 
 function buildTransportEntry(name, rate, inputs, belt, inputStackSize, outputStackSize) {
   if (isFluidName(name)) {
-    return { name, rate, type: "fluid", pipeCapacity: PIPE_RATE };
+    return {
+      name,
+      rate,
+      type: "fluid",
+      pipeCapacity: PIPE_RATE,
+      lanes: requiredLanes(rate, PIPE_RATE),
+    };
   }
   // Only external supplies use the input stack assumption. Every local
   // producer (including intermediates) uses the configured output inserter.
@@ -164,16 +178,59 @@ function buildTransportEntry(name, rate, inputs, belt, inputStackSize, outputSta
     ? inputStackSize
     : outputStackSize;
   const laneCapacity = BELTS[belt].laneRate * stackSize;
-  return { name, rate, stackSize, laneCapacity, beltCapacity: laneCapacity * 2 };
+  return {
+    name,
+    rate,
+    stackSize,
+    laneCapacity,
+    beltCapacity: laneCapacity * 2,
+    lanes: requiredLanes(rate, laneCapacity),
+  };
 }
 
-function checkTransportIssue(entry, belt) {
+function entryCapacity(entry) {
+  return entry.type === "fluid" ? entry.pipeCapacity : entry.laneCapacity;
+}
+
+function computeTransport(units, inputs, belt, inputStackSize, outputStackSize) {
+  // Merges side-load one belt lane. Budget against that lane, not the full belt.
+  const traffic = new Map();
+  for (const unit of units) {
+    const recipe = recipeById[unit.recipe];
+    const productivity = productivityFor(recipe, unit.factory);
+    for (const result of unit.results || recipe.results) {
+      addRate(
+        traffic,
+        result.name,
+        unit.crafts * result.amount * (1 + productivity),
+      );
+    }
+  }
+  for (const input of inputs) addRate(traffic, input.name, input.rate);
+  return [...traffic].map(([name, rate]) =>
+    buildTransportEntry(name, rate, inputs, belt, inputStackSize, outputStackSize),
+  );
+}
+
+function checkTransportIssue(entry, belt, reason = "") {
+  const suffix = reason ? ` ${reason}` : "";
   if (entry.type === "fluid") {
     if (!rateExceeds(entry.rate, entry.pipeCapacity)) return null;
-    return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout budgets ${formatRate(entry.pipeCapacity)}/min per pipe (1,200/s). Reduce the target.`;
+    return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout budgets ${formatRate(entry.pipeCapacity)}/min per pipe (1,200/s).${suffix || " Reduce the target."}`;
   }
   if (!rateExceeds(entry.rate, entry.laneCapacity)) return null;
-  return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout allows ${formatRate(entry.laneCapacity)}/min per ${BELTS[belt].name.toLowerCase()} lane. Use a faster belt, increase the relevant stack size, or reduce the target. One material uses one lane (0.5 full belts); parallel belts are not generated.`;
+  return `${title(entry.name)} needs ${formatRate(entry.rate)}/min; this layout allows ${formatRate(entry.laneCapacity)}/min per ${BELTS[belt].name.toLowerCase()} lane.${suffix || " Use a faster belt, increase the relevant stack size, or reduce the target."}`;
+}
+
+function unsplitReason(entry, neededSections, hasEnoughMachines) {
+  if (!hasEnoughMachines) {
+    return `Splitting across ${neededSections} sections requires at least ${neededSections} machines per production step.`;
+  }
+  const hint =
+    entry.type === "fluid"
+      ? " Adjust the machine counts."
+      : " Adjust the machine counts, use a faster belt, or increase the stack size.";
+  return `Fixed machine counts cannot be split across ${neededSections} or more parallel sections without under-sizing a section.${hint}`;
 }
 
 export function finishPlan(units, inputs, outputs, config = {}) {
@@ -188,11 +245,95 @@ export function finishPlan(units, inputs, outputs, config = {}) {
   const machineCount = ordered.reduce((sum, unit) => sum + unit.count, 0);
   if (!machineCount) throw new Error("Add at least one production step.");
   const issues = [];
-  if (!Number.isInteger(maxMachines) || maxMachines < 1 || maxMachines > 200)
-    issues.push("Machine budget must be a whole number between 1 and 200.");
+  const rawTransport = computeTransport(
+    ordered,
+    normalizedInputs,
+    belt,
+    inputStackSize,
+    outputStackSize,
+  );
+  const neededSections = Math.max(1, ...rawTransport.map((entry) => entry.lanes));
+  const hasExplicitSplit =
+    neededSections > 1 &&
+    ordered.every(
+      (unit) =>
+        Array.isArray(unit.sectionCounts) &&
+        unit.sectionCounts.length === neededSections &&
+        unit.sectionCounts.every((count) => count >= 1),
+    );
+  let sections = neededSections;
+  if (sections === 1) {
+    for (const unit of ordered) {
+      if (!unit.sectionCounts) unit.sectionCounts = [unit.count];
+    }
+  } else if (!hasExplicitSplit) {
+    // Fixed-count callers (Helmod or direct finishPlan) feed every parallel
+    // section at 1/count of the total rate, so each unit's smallest integer
+    // slice must cover 1/count of its crafts within single-lane/pipe limits.
+    const canSplitAt = (count) => {
+      if (
+        !ordered.every((unit) => {
+          const minSlice = Math.floor(unit.count / count);
+          if (minSlice < 1) return false;
+          const sliceCapacity =
+            minSlice *
+            craftingCapacity(recipeById[unit.recipe], unit.factory, outputStackSize);
+          return !rateExceeds(unit.crafts / count, sliceCapacity);
+        })
+      )
+        return false;
+      return rawTransport.every(
+        (entry) => !rateExceeds(entry.rate / count, entryCapacity(entry)),
+      );
+    };
+    const minUnitCount = Math.min(...ordered.map((unit) => unit.count));
+    let resolved = null;
+    for (let candidate = neededSections; candidate <= minUnitCount; candidate++) {
+      if (canSplitAt(candidate)) {
+        resolved = candidate;
+        break;
+      }
+    }
+    if (resolved !== null) {
+      sections = resolved;
+      for (const unit of ordered) {
+        unit.sectionCounts = splitCount(unit.count, sections);
+      }
+    } else if (config.sections === undefined) {
+      const hasEnoughMachines = ordered.every(
+        (unit) => unit.count >= neededSections,
+      );
+      for (const entry of rawTransport) {
+        const reason = unsplitReason(entry, neededSections, hasEnoughMachines);
+        const issue = checkTransportIssue(entry, belt, reason);
+        if (issue) issues.push(issue);
+      }
+      sections = 1;
+      for (const unit of ordered) {
+        unit.sectionCounts = [unit.count];
+      }
+    }
+  }
+  const transport = rawTransport.map((entry) => ({
+    ...entry,
+    perSectionRate: entry.rate / sections,
+  }));
+  const bottlenecks =
+    sections > 1
+      ? transport
+          .filter((entry) => entry.lanes > 1)
+          .sort(
+            (a, b) =>
+              b.rate / entryCapacity(b) - a.rate / entryCapacity(a),
+          )
+      : [];
+  if (!Number.isInteger(maxMachines) || maxMachines < 1 || maxMachines > MAX_MACHINES)
+    issues.push(`Machine budget must be a whole number between 1 and ${MAX_MACHINES}.`);
   if (machineCount > maxMachines)
     issues.push(
-      `This line needs ${machineCount} machines; your budget is ${maxMachines}. Reduce the target or increase the budget.`,
+      sections > 1
+        ? `This line needs ${machineCount} machines across ${sections} parallel sections; your budget is ${maxMachines}. Reduce the target, use a faster belt, or increase the budget.`
+        : `This line needs ${machineCount} machines; your budget is ${maxMachines}. Reduce the target or increase the budget.`,
     );
   for (const input of normalizedInputs) {
     const raw = config.inputLimits?.[input.name];
@@ -212,26 +353,6 @@ export function finishPlan(units, inputs, outputs, config = {}) {
         `${title(input.name)} needs ${formatRate(input.rate)}/min, but only ${formatRate(limit)}/min is available.`,
       );
   }
-  // Merges side-load one belt lane. Budget against that lane, not the full belt.
-  const traffic = new Map();
-  for (const unit of ordered)
-    for (const result of unit.results) {
-      const recipe = recipeById[unit.recipe];
-      const productivity = productivityFor(recipe, unit.factory);
-      addRate(
-        traffic,
-        result.name,
-        unit.crafts * result.amount * (1 + productivity),
-      );
-    }
-  for (const input of normalizedInputs) addRate(traffic, input.name, input.rate);
-  const transport = [...traffic].map(([name, rate]) =>
-    buildTransportEntry(name, rate, normalizedInputs, belt, inputStackSize, outputStackSize),
-  );
-  for (const entry of transport) {
-    const issue = checkTransportIssue(entry, belt);
-    if (issue) issues.push(issue);
-  }
   const hasFluids = normalizedInputs.some((input) => input.type === "fluid");
   return {
     units: ordered,
@@ -242,10 +363,15 @@ export function finishPlan(units, inputs, outputs, config = {}) {
     inputStackSize,
     outputStackSize,
     transport,
+    sections,
+    bottlenecks,
     layoutMode,
     issues,
     warnings: [
       `Sizing includes conservative inserter budgets (90 items/min for fast, 45 for long-handed${outputStackSize > 1 ? `, ${90 * outputStackSize} for stack outputs` : ""}). Normal quality, no modules. Actual belt loading can affect throughput; verify the line in Factorio.`,
+      ...(sections > 1
+        ? [`Split into ${sections} parallel sections so every ${BELTS[belt].name.toLowerCase()} lane${hasFluids ? " and pipe" : ""} stays within capacity. Feed each section's west entrances at 1/${sections} of the total rate.`]
+        : []),
       ...(hasFluids
         ? ["Fluid ingredients are supplied by pipe (budgeted at 1,200 fluid/s per pipe). Connect each marked fluid pipe entrance."] : []),
       ...(belt === "turbo-transport-belt"
@@ -263,7 +389,7 @@ export function formatRate(value) {
 }
 
 export function planProduction(config) {
-  const { belt, rateUnit, outputStackSize, spaceAge } = transportSettings(config);
+  const { belt, rateUnit, inputStackSize, outputStackSize, spaceAge } = transportSettings(config);
   const effectiveConfig = { ...config, spaceAge };
   if (
     !Array.isArray(config.outputs) ||
@@ -323,6 +449,25 @@ export function planProduction(config) {
   // A requested output that is also an intermediate must be produced locally.
   for (const item of targets.keys()) supplied.delete(item);
   for (const [name, rate] of targets) requireItem(name, rate, new Set(), true);
+  const externalInputs = [...external].map(([name, rate]) =>
+    normalizeInput({ name, rate }),
+  );
+  const preliminaryUnits = [...demand].map(([recipeId, crafts]) => ({
+    recipe: recipeId,
+    factory: factories.get(recipeId) || factoryFor(recipeById[recipeId], effectiveConfig),
+    crafts,
+  }));
+  const preliminaryTransport = computeTransport(
+    preliminaryUnits,
+    externalInputs,
+    belt,
+    inputStackSize,
+    outputStackSize,
+  );
+  const sections = Math.max(
+    1,
+    ...preliminaryTransport.map((entry) => entry.lanes),
+  );
   const units = [...demand].map(([recipeId, crafts]) => {
     const recipe = recipeById[recipeId];
     const override = config.machineOverrides?.[recipeId] || {};
@@ -330,38 +475,52 @@ export function planProduction(config) {
     const machine = MACHINES[factory];
     if (!machine || !canCraft(machine, recipe))
       throw new Error(`Select a compatible machine for ${recipe.name}.`);
-    const required = Math.max(
+    const perSectionRequired = Math.max(
       1,
-      Math.ceil(crafts / craftingCapacity(recipe, factory, outputStackSize) - 1e-9),
+      Math.ceil(
+        crafts / sections / craftingCapacity(recipe, factory, outputStackSize) -
+          1e-9,
+      ),
     );
-    let count =
-      override.count === undefined || override.count === ""
-        ? required
-        : Number(override.count);
-    if (!Number.isInteger(count) || count < 1 || count > 200) {
+    const required = perSectionRequired * sections;
+    const isAuto = override.count === undefined || override.count === "";
+    let count = isAuto ? required : Number(override.count);
+    if (isAuto && count > MAX_MACHINES) {
+      const sectionText =
+        sections > 1 ? ` across ${sections} parallel sections` : "";
       issues.push(
-        `Machine count for ${recipe.name} must be a whole number between 1 and 200.`,
+        `${recipe.name} needs ${required} ${machine.name.toLowerCase()} machines${sectionText} (maximum ${MAX_MACHINES}). Reduce the target or use faster machines or belts.`,
       );
-      count = Math.min(required, 200);
+      count = MAX_MACHINES;
+    } else if (!Number.isInteger(count) || count < 1 || count > MAX_MACHINES) {
+      issues.push(
+        `Machine count for ${recipe.name} must be a whole number between 1 and ${MAX_MACHINES}.`,
+      );
+      count = Math.min(required, MAX_MACHINES);
+    } else if (count < required) {
+      issues.push(
+        sections > 1
+          ? `${recipe.name} needs at least ${required} ${machine.name.toLowerCase()} machines (${perSectionRequired} per section across ${sections} sections) for this target.`
+          : `${recipe.name} needs at least ${required} ${machine.name.toLowerCase()} machines for this target.`,
+      );
     }
-    if (count < required)
-      issues.push(
-        `${recipe.name} needs at least ${required} ${machine.name.toLowerCase()} machines for this target.`,
-      );
+    const sectionCounts = count >= sections ? splitCount(count, sections) : undefined;
     return {
       recipe: recipeId,
       factory,
       count,
       crafts,
       required,
+      perSectionRequired,
+      ...(sectionCounts ? { sectionCounts } : {}),
       utilization: (crafts * recipe.time) / (machine.speed * 60 * count),
     };
   });
   const plan = finishPlan(
     units,
-    [...external].map(([name, rate]) => ({ name, rate })),
+    externalInputs,
     [...targets].map(([name, rate]) => ({ name, rate })),
-    effectiveConfig,
+    { ...effectiveConfig, sections },
   );
   plan.issues.push(...issues);
   return plan;

@@ -3,6 +3,7 @@ import { RECIPES, MACHINES, isFluidName } from "./recipeCatalog.js";
 import {
   BELTS,
   DEFAULT_CONFIG,
+  MAX_MACHINES,
   MAX_OUTPUTS,
   canCraft,
   planProduction,
@@ -20,8 +21,8 @@ import {
   convertRateUnit,
   fluidRateScale,
   numericRate,
-  rateExceeds,
   rateScale,
+  requiredLanes,
 } from "./transport.js";
 import "./App.css";
 
@@ -76,6 +77,31 @@ function inputUnitLabel(isFluid, rateUnit) {
   if (isFluid) return rateUnit === "items/min" ? "fluid/min" : "fluid/s";
   if (rateUnit === "belts") return "belts";
   return rateUnit === "items/s" ? "/ sec" : "/ min";
+}
+function formatBottleneckSummary(plan) {
+  const top = plan.bottlenecks?.[0];
+  if (!top) return "";
+  const capacity = top.type === "fluid" ? top.pipeCapacity : top.laneCapacity;
+  const unit =
+    top.type === "fluid"
+      ? "per pipe"
+      : `per ${BELTS[plan.belt].name.toLowerCase()} lane`;
+  const extra = plan.bottlenecks.length - 1;
+  const materialWord = extra === 1 ? "material" : "materials";
+  const extraText =
+    extra > 0
+      ? ` (${extra} other ${materialWord} also over one lane)`
+      : "";
+  return `${title(top.name)} needs ${formatRate(top.rate)}/min (${formatRate(capacity)}/min ${unit})${extraText}.`;
+}
+function inputSupplyHint(plan) {
+  if (plan?.sections > 1) {
+    return `Total demand is split evenly across ${plan.sections} parallel sections — feed each section's marked entrance on the west edge.`;
+  }
+  const fluidSuffix = plan?.inputs.some((input) => input.type === "fluid")
+    ? " and each fluid at its marked pipe entrance."
+    : ".";
+  return `Feed each listed item at its marked belt entrance${fluidSuffix}`;
 }
 const initialConfig = () => ({
   ...DEFAULT_CONFIG,
@@ -313,7 +339,7 @@ export default function App() {
                 <p className="help">
                   Enter a fraction or multiple of a full belt. 1 output belt = {formatRate(outputScale / 60)} items/s
                   ({formatRate(outputScale)} items/min) at the selected tier and output stack size.
-                  Each material gets one lane, so this layout supports at most 0.5 belts per material.
+                  Rates above one lane (0.5 belts) automatically split into parallel sections.
                 </p>
               )}
               <div className="output-targets">
@@ -357,12 +383,21 @@ export default function App() {
                 </div>
                 {numericRate(output.rate) > 0 && (() => {
                   const perMinute = Number(output.rate) * outputScale;
-                  const over = rateExceeds(perMinute, outputLaneCapacity);
+                  const lanes = requiredLanes(perMinute, outputLaneCapacity);
                   return (
-                    <p className={`rate-feedback ${over ? "over-capacity" : ""}`}>
+                    <p className={`rate-feedback ${lanes > 1 ? "multi-lane" : ""}`}>
                       {perSecond(perMinute / 60)} · {formatRate(perMinute)} items/min
-                      {" · "}{formatRate(perMinute / outputLaneCapacity * 100)}% of output lane
-                      {over && <strong> · over lane capacity</strong>}
+                      {lanes > 1 ? (
+                        <>
+                          {" · "}
+                          <strong>{lanes} output lanes</strong> (auto-split)
+                        </>
+                      ) : (
+                        <>
+                          {" · "}
+                          {formatRate((perMinute / outputLaneCapacity) * 100)}% of output lane
+                        </>
+                      )}
                     </p>
                   );
                 })()}
@@ -470,7 +505,7 @@ export default function App() {
                   <input
                     type="number"
                     min="1"
-                    max="200"
+                    max={MAX_MACHINES}
                     step="1"
                     value={config.maxMachines}
                     onChange={(e) => update({ maxMachines: e.target.value })}
@@ -528,11 +563,8 @@ export default function App() {
                 <span className="unit">{config.rateUnit === "belts" ? "BELT LIMIT" : `LIMIT / ${config.rateUnit === "items/s" ? "SEC" : "MIN"}`}</span>
               </div>
               <p className="help">
-                Leave a limit blank for unlimited supply. Feed each listed item
-                at its marked belt entrance
-                {plan?.inputs.some((input) => input.type === "fluid")
-                  ? " and each fluid at its marked pipe entrance."
-                  : "."}
+                Leave a limit blank for unlimited supply.{" "}
+                {inputSupplyHint(plan)}
                 {config.inputStackSize > 1 && ` Supply all belt inputs in stacks of at least ${config.inputStackSize}.`}
                 {config.rateUnit === "belts" && ` 1 input belt = ${formatRate(inputScale / 60)} items/s at ${config.inputStackSize} item${config.inputStackSize === 1 ? "" : "s"} high.`}
               </p>
@@ -560,6 +592,8 @@ export default function App() {
                       )}
                       <small>
                         Needs {formatRate(need)} {unitLabel}
+                        {plan.sections > 1 &&
+                          ` · ${plan.sections} ${isFluid ? "pipes" : "lanes"} of ${formatRate(need / plan.sections)}`}
                         {short && <strong> · limit is {formatRate(need - limit)} short</strong>}
                       </small>
                     </label>
@@ -674,6 +708,18 @@ export default function App() {
                     <strong>{plan.inputs.length}</strong>
                     <span>input materials</span>
                   </div>
+                </div>
+              )}
+              {plan && plan.sections > 1 && !plan.issues.length && (
+                <div className="section-notice" role="note">
+                  <strong>
+                    Auto-batched into {plan.sections} parallel sections
+                  </strong>
+                  <p>
+                    {formatBottleneckSummary(plan)} Each section runs at 1/
+                    {plan.sections} rate with its own west input and east output
+                    lanes, wired into one power grid.
+                  </p>
                 </div>
               )}
               {result.error && (
@@ -803,7 +849,11 @@ export default function App() {
               <section className="panel production-panel">
                 <div className="section-heading">
                   <h2>Production line</h2>
-                  <span className="unit">AUTOMATIC SIZING</span>
+                  <span className="unit">
+                    {plan.sections > 1
+                      ? `AUTOMATIC SIZING · ${plan.sections} PARALLEL SECTIONS`
+                      : "AUTOMATIC SIZING"}
+                  </span>
                 </div>
                 <div className="table-scroll">
                   <table>
@@ -825,6 +875,15 @@ export default function App() {
                             {title(unit.recipe)}
                             <small>
                               {Math.round(unit.utilization * 100)}% crafting use
+                              {plan.sections > 1 &&
+                                unit.sectionCounts &&
+                                (() => {
+                                  const min = Math.min(...unit.sectionCounts);
+                                  const max = Math.max(...unit.sectionCounts);
+                                  const perSection =
+                                    min === max ? String(min) : `${min}–${max}`;
+                                  return ` · ${perSection} per section`;
+                                })()}
                             </small>
                           </th>
                           <td>
@@ -857,7 +916,7 @@ export default function App() {
                               aria-label={`Count for ${title(unit.recipe)}`}
                               type="number"
                               min={unit.required || 1}
-                              max="200"
+                              max={MAX_MACHINES}
                               step="1"
                               placeholder={String(unit.count)}
                               value={

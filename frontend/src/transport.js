@@ -28,6 +28,13 @@ export const RATE_UNITS = ["items/min", "items/s", "belts"];
 export const rateExceeds = (rate, capacity) =>
   rate - capacity > 64 * Number.EPSILON * Math.max(Math.abs(rate), Math.abs(capacity));
 
+export function requiredLanes(rate, capacity) {
+  if (!rateExceeds(rate, capacity)) return 1;
+  const estimate = Math.max(2, Math.ceil(rate / capacity));
+  if (!rateExceeds(rate, (estimate - 1) * capacity)) return estimate - 1;
+  return estimate;
+}
+
 export function numericRate(value) {
   return typeof value === "number" || (typeof value === "string" && value.trim() !== "")
     ? Number(value)

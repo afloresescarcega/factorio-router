@@ -54,8 +54,7 @@ test("native CLI requires the Space Age switch for turbo belts and stacking", ()
 test("native CLI never emits blueprints for invalid Space Age constraints", () => {
   for (const patch of [
     { outputStackSize: 5 }, { inputStackSize: 1.5 }, { rateUnit: "belt/s" },
-    { outputs: [{ recipe: "copper-cable", rate: 0.501 }] },
-    { inputStackSize: 1 }, { inputLimits: { "copper-plate": 0.249 } },
+    { inputLimits: { "copper-plate": 0.249 } },
   ]) {
     const result = run(JSON.stringify({
       spaceAge: true, belt: "turbo-transport-belt", rateUnit: "belts", inputStackSize: 4, outputStackSize: 4,
@@ -64,6 +63,23 @@ test("native CLI never emits blueprints for invalid Space Age constraints", () =
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
     assert.ok(result.stderr.length > 0);
+  }
+});
+
+test("native CLI auto-batches over-lane targets and validates multi-section blueprints", () => {
+  for (const patch of [
+    { outputs: [{ recipe: "copper-cable", rate: 0.501 }] },
+    { inputStackSize: 1 },
+  ]) {
+    const result = run(JSON.stringify({
+      spaceAge: true, belt: "turbo-transport-belt", rateUnit: "belts", inputStackSize: 4, outputStackSize: 4,
+      outputs: [{ recipe: "copper-cable", rate: 0.5 }], ...patch,
+    }), ["--plan", "--compact"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /passed schema/);
+    const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
+    assert.match(blueprint.label, /\(2×\)/);
+    assert.match(blueprint.description, /Split into 2 parallel sections/);
   }
 });
 

@@ -628,6 +628,8 @@ button:disabled {
 }
 
 .rate-feedback.over-capacity { color: var(--red-hi); }
+.rate-feedback.multi-lane { color: var(--amber); }
+.rate-feedback.multi-lane strong { color: var(--orange-lit); }
 .target-count { font-size: 0.78rem; color: var(--muted); margin-left: 12px; }
 
 .stacking-options {
@@ -1134,6 +1136,30 @@ td .text-button {
   color: var(--muted);
   line-height: 1.65;
   padding: 0 4px;
+}
+
+/* ---- Section batching notice: recessed amber readout plate -- */
+.section-notice {
+  padding: 16px 18px 14px;
+  border-radius: 4px;
+  background:
+    repeating-linear-gradient(-45deg, #c8912c 0 7px, #1d1811 7px 14px)
+      top / 100% 4px no-repeat,
+    var(--well-deep);
+  box-shadow:
+    var(--sunken),
+    inset 0 0 0 1px rgba(227, 152, 39, 0.28);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  margin: 0 0 18px;
+}
+
+.section-notice strong {
+  display: block;
+  color: var(--amber);
+  font-size: 0.9rem;
+  margin-bottom: 4px;
 }
 
 /* ---- Alerts: a stencilled warning plate -------------------- */
