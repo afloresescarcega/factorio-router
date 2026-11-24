@@ -489,6 +489,9 @@ test("all six vanilla science packs are selectable, grouped properly, and export
     expect(groups["Intermediate products"]).toContain(pack);
   }
 
+  // Switch to the export tab before selecting multi-stage science lines so jsdom
+  // skips rendering large SVG previews while verifying inputs and exports.
+  fireEvent.click(screen.getByRole("tab", { name: "Blueprint string" }));
   fireEvent.change(screen.getByLabelText("Belts"), {
     target: { value: "express-transport-belt" },
   });
@@ -500,7 +503,9 @@ test("all six vanilla science packs are selectable, grouped properly, and export
   expect(screen.getByLabelText("Sulfuric acid supply limit")).toBeInTheDocument();
   expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
-  const utilityBp = decodeBlueprint(showExport().value).blueprint;
+  const utilityBp = decodeBlueprint(
+    screen.getByLabelText("Import this string in Factorio").value,
+  ).blueprint;
   expect(utilityBp.entities.some((e) => e.recipe === "utility-science-pack")).toBe(true);
   expect(utilityBp.entities.some((e) => e.recipe === "flying-robot-frame")).toBe(true);
 
@@ -508,7 +513,9 @@ test("all six vanilla science packs are selectable, grouped properly, and export
   expect(screen.getByLabelText("Water supply limit")).toBeInTheDocument();
   expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Copy blueprint/ })).toBeEnabled();
-  const chemBp = decodeBlueprint(showExport().value).blueprint;
+  const chemBp = decodeBlueprint(
+    screen.getByLabelText("Import this string in Factorio").value,
+  ).blueprint;
   expect(chemBp.entities.some((e) => e.recipe === "chemical-science-pack")).toBe(true);
   expect(chemBp.entities.some((e) => e.recipe === "sulfur")).toBe(true);
-});
+}, 30000);

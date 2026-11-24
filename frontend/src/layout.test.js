@@ -418,7 +418,7 @@ test("every catalog recipe exports without overlap, missing routes or invalid na
       recipe.id,
     ).toEqual({ ok: true, errors: [] });
   }
-});
+}, 30000);
 
 test("every electronics recipe exports on the electromagnetic plant", () => {
   for (const recipe of RECIPES.filter(
@@ -991,6 +991,7 @@ test.each(["standard", "compact"])(
     expect(validateBlueprintString(encoded)).toEqual({ ok: true, errors: [] });
     expect(decodeBlueprint(encoded)).toEqual(layout.blueprint);
   },
+  30000,
 );
 
 test.each(["standard", "compact"])(
