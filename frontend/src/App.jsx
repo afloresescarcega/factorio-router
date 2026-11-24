@@ -396,7 +396,7 @@ export default function App() {
                 Build intermediate products
               </label>
               <p className="help">
-                Automatically include steps such as copper cable and gears.
+                Automatically include steps such as copper cable, gears, and plastic.
               </p>
             </section>
             <section className="panel">
@@ -543,21 +543,42 @@ export default function App() {
                 const limit = numericRate(config.inputLimits[input.name]);
                 const short = Number.isFinite(limit) && limit < need * (1 - 1e-9);
                 const unitLabel = inputUnitLabel(isFluid, config.rateUnit);
+                const canBuildLocally =
+                  config.intermediates &&
+                  config.externalItems.includes(input.name) &&
+                  Object.hasOwn(recipeById, input.name);
                 return (
                 <div className={`input-row ${short ? "over-limit" : ""}`} key={input.name}>
-                  <label htmlFor={`supply-${input.name}`}>
-                    {title(input.name)}
-                    {isFluid && (
-                      <>
-                        {" "}
-                        <span className="fluid-tag">pipe</span>
-                      </>
+                  <div className="input-meta">
+                    <label htmlFor={`supply-${input.name}`}>
+                      {title(input.name)}
+                      {isFluid && (
+                        <>
+                          {" "}
+                          <span className="fluid-tag">pipe</span>
+                        </>
+                      )}
+                      <small>
+                        Needs {formatRate(need)} {unitLabel}
+                        {short && <strong> · limit is {formatRate(need - limit)} short</strong>}
+                      </small>
+                    </label>
+                    {canBuildLocally && (
+                      <button
+                        type="button"
+                        className="text-button inline-build-button"
+                        onClick={() =>
+                          update({
+                            externalItems: config.externalItems.filter(
+                              (item) => item !== input.name,
+                            ),
+                          })
+                        }
+                      >
+                        Build in line
+                      </button>
                     )}
-                    <small>
-                      Needs {formatRate(need)} {unitLabel}
-                      {short && <strong> · limit is {formatRate(need - limit)} short</strong>}
-                    </small>
-                  </label>
+                  </div>
                   <input
                     aria-label={`${title(input.name)} supply limit`}
                     id={`supply-${input.name}`}

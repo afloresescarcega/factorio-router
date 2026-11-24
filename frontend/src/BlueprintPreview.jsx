@@ -13,7 +13,11 @@ const COLORS = {
 const WIRE = "#c8763a";
 const GRID = "#372f27";
 function entityColor(name, { machine, pole, inserter, pipe }) {
-  if (machine) return name === "electromagnetic-plant" ? "#d8a143" : COLORS.machine;
+  if (machine) {
+    if (name === "electromagnetic-plant") return "#d8a143";
+    if (name === "chemical-plant") return "#d4846a";
+    return COLORS.machine;
+  }
   if (pole) return COLORS.pole;
   if (pipe) return COLORS.pipe;
   if (inserter) return name === "stack-inserter" ? "#c9ded3" : COLORS.inserter;
@@ -32,6 +36,7 @@ function annotationColor(annotation) {
 function machineLabel(name) {
   if (name === "electromagnetic-plant") return "EM";
   if (name === "electric-furnace") return "EF";
+  if (name === "chemical-plant") return "CP";
   return `A${name.at(-1)}`;
 }
 const Entity = memo(function Entity({ entity }) {
@@ -133,6 +138,7 @@ function BlueprintPreview({ layout }) {
   const { bounds, blueprint, annotations, footprint } = layout;
   const hasStackOutputs = blueprint.blueprint.entities.some((entity) => entity.name === "stack-inserter");
   const hasElectromagneticPlant = blueprint.blueprint.entities.some((entity) => entity.name === "electromagnetic-plant");
+  const hasChemicalPlant = blueprint.blueprint.entities.some((entity) => entity.name === "chemical-plant");
   const hasPipes = blueprint.blueprint.entities.some(
     (entity) => entity.name === "pipe" || entity.name === "pipe-to-ground",
   );
@@ -264,6 +270,7 @@ function BlueprintPreview({ layout }) {
           <i style={{ background: COLORS.machine }} />
           Machines
         </span>
+        {hasChemicalPlant && <span><i style={{ background: "#d4846a" }} />Chemical plant</span>}
         {hasElectromagneticPlant && <span><i style={{ background: "#d8a143" }} />Electromagnetic plant</span>}
         <span>
           <i style={{ background: beltColor }} />

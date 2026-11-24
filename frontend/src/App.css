@@ -679,8 +679,18 @@ button:disabled {
   font-size: 0.87rem;
 }
 
+.input-meta {
+  min-width: 0;
+}
+
+.inline-build-button {
+  padding: 4px 0 0;
+  font-size: 0.78rem;
+}
+
 .input-row input {
   width: 109px;
+  flex-shrink: 0;
   font-size: 0.8rem;
 }
 

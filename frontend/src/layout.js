@@ -19,8 +19,10 @@ export const COLUMN_SPACING = 20,
   MAX_PER_COLUMN = 12;
 
 // Orient fluid-consuming machines so their first fluid input port opens EAST
-// at (x + right + 1, y) for both 3x3 assemblers (base port NORTH at {0, -1})
-// and 4x4 electromagnetic plants (base port WEST at {-1.5, 0.5}).
+// at (x + right + 1, y + fluidPipeOffset):
+// - 3x3 assemblers: base port NORTH at {0, -1} -> EAST gives {1, 0} (offset 0)
+// - 3x3 chemical plant: base port NORTH at {-1, -1} -> EAST gives {1, -1} (offset -1)
+// - 4x4 electromagnetic plant: base port WEST at {-1.5, 0.5} -> SOUTH gives {1.5, -0.5} (offset 0)
 export function fluidMachineDirection(factory) {
   const size = MACHINES[factory]?.size ?? 3;
   return size === 4 ? SOUTH : EAST;
@@ -47,6 +49,7 @@ export function entitySize(entity) {
 export function machineGeometry(factory, compact = false) {
   const size = MACHINES[factory]?.size ?? 3;
   const right = size - 2;
+  const isChemicalPlant = factory === "chemical-plant";
   return {
     size,
     centerOffset: size % 2 === 0 ? 1 : 0.5,
@@ -54,10 +57,13 @@ export function machineGeometry(factory, compact = false) {
     channels: compact ? [-3, -4, right + 3] : [-5, -8, right + 6],
     outputInserter: right + 1,
     outputBelt: right + 2,
+    fluidPipeOffset: isChemicalPlant ? -1 : 0,
+    fluidOutputOffset: isChemicalPlant ? 0 : 1,
     fluidPipeExit: right + 3,
     fluidPipeLane: right + 4,
     poleGap: size - 1,
     poleRight: size - 1,
+    poleRightGap: isChemicalPlant ? size - 2 : size - 1,
     rowSpacing: size + (compact ? 0 : 1),
   };
 }
@@ -341,23 +347,29 @@ export function createLayout(
       for (let y = bend; y <= (count - 1) * rowSpacing + 1; y++)
         belt(lane, y, SOUTH);
     });
-    const outputEndY = (count - 1) * rowSpacing + (hasFluid ? 1 : 0);
+    const outputOffset = hasFluid ? geometry.fluidOutputOffset : 0;
+    const outputEndY = (count - 1) * rowSpacing + outputOffset;
     for (let y = -2; y <= outputEndY; y++)
       belt(x + geometry.outputBelt, y, NORTH);
     if (hasFluid)
-      for (let y = -1; y <= (count - 1) * rowSpacing; y++)
+      for (
+        let y = -1;
+        y <= (count - 1) * rowSpacing + geometry.fluidPipeOffset;
+        y++
+      )
         pipe(x + geometry.fluidPipeLane, y);
     for (let i = 0; i < count; i++) {
       const y = i * rowSpacing;
       add(unit.factory, x, y, machineOptions(unit, hasFluid));
       if (hasFluid) {
-        undergroundPipe(x + geometry.outputInserter, y, WEST);
-        undergroundPipe(x + geometry.fluidPipeExit, y, EAST);
+        const pipeY = y + geometry.fluidPipeOffset;
+        undergroundPipe(x + geometry.outputInserter, pipeY, WEST);
+        undergroundPipe(x + geometry.fluidPipeExit, pipeY, EAST);
       }
       add(
         outputInserterName,
         x + geometry.outputInserter,
-        y + (hasFluid ? 1 : 0),
+        y + outputOffset,
         outputInserterExtra,
       );
       if (solids[0])
@@ -370,7 +382,7 @@ export function createLayout(
       else if (i % 2 === 0) {
         // Side poles cover two touching machine rows and their inserters.
         pole(x - 2, y + geometry.poleGap);
-        pole(x + geometry.poleRight, y + geometry.poleGap);
+        pole(x + geometry.poleRight, y + geometry.poleRightGap);
       }
     }
     pole(x - 2, -2);

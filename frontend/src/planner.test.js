@@ -300,3 +300,58 @@ test("plans processing units with sulfuric-acid fluid supply and compatible mach
   );
   expect(overPipe.issues.join(" ")).toMatch(/72,000\/min per pipe/);
 });
+
+test("builds plastic bars in chemical plants as an intermediate and supports external override", () => {
+  const result = plan({
+    outputs: [{ recipe: "processing-unit", rate: 15 }],
+    assembler: "assembling-machine-2",
+    belt: "express-transport-belt",
+  });
+  expect(result.issues).toEqual([]);
+  const plastic = result.units.find((unit) => unit.recipe === "plastic-bar");
+  expect(plastic).toBeDefined();
+  expect(plastic.factory).toBe("chemical-plant");
+  expect(plastic.crafts).toBeCloseTo(30);
+  expect(plastic.count).toBe(1);
+  // Output inserter caps unstacked plastic at 90/min (45 crafts/min); stacked hits 60 crafts/min speed limit.
+  expect(craftingCapacity(recipeById["plastic-bar"], "chemical-plant", 1)).toBe(45);
+  expect(craftingCapacity(recipeById["plastic-bar"], "chemical-plant", 2)).toBe(60);
+  expect(result.inputs.find((input) => input.name === "petroleum-gas")).toEqual({
+    name: "petroleum-gas",
+    rate: 600,
+    type: "fluid",
+  });
+  expect(rate(result.inputs, "coal")).toBeCloseTo(30);
+  expect(rate(result.inputs, "plastic-bar")).toBeUndefined();
+
+  // Supplying plastic externally removes the chemical plant step and its coal/petroleum-gas demand.
+  const externalPlastic = plan({
+    outputs: [{ recipe: "processing-unit", rate: 15 }],
+    assembler: "assembling-machine-2",
+    belt: "express-transport-belt",
+    externalItems: ["plastic-bar"],
+  });
+  expect(externalPlastic.units.some((unit) => unit.recipe === "plastic-bar")).toBe(false);
+  expect(rate(externalPlastic.inputs, "plastic-bar")).toBeCloseTo(60);
+  expect(rate(externalPlastic.inputs, "petroleum-gas")).toBeUndefined();
+  expect(rate(externalPlastic.inputs, "coal")).toBeUndefined();
+
+  // Chemical plant is required for chemistry recipes; assemblers are rejected.
+  expect(factoryFor(recipeById["plastic-bar"], DEFAULT_CONFIG)).toBe("chemical-plant");
+  expect(canCraft("chemical-plant", recipeById["plastic-bar"])).toBe(true);
+  expect(canCraft("assembling-machine-2", recipeById["plastic-bar"])).toBe(false);
+  expect(() =>
+    plan({
+      outputs: [{ recipe: "plastic-bar", rate: 60 }],
+      machineOverrides: { "plastic-bar": { factory: "assembling-machine-2" } },
+    }),
+  ).toThrow(/Select a compatible machine/);
+
+  // Petroleum gas supply limits are enforced as fluids.
+  expect(
+    plan({
+      outputs: [{ recipe: "plastic-bar", rate: 60 }],
+      inputLimits: { "petroleum-gas": 400 },
+    }).issues.join(" "),
+  ).toMatch(/Petroleum gas needs 600\/min, but only 400\/min is available/);
+});

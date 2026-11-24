@@ -29,6 +29,7 @@ const PIPE_UNDERGROUND_REACH = 10;
 const MACHINE_FLUID_INPUT = {
   "assembling-machine-2": { direction: 0, position: [0, -1] },
   "assembling-machine-3": { direction: 0, position: [0, -1] },
+  "chemical-plant": { direction: 0, position: [-1, -1] },
   "electromagnetic-plant": { direction: 12, position: [-1.5, 0.5] },
 };
 const key = (x, y) => `${x},${y}`;
@@ -452,6 +453,62 @@ test.each(["standard", "compact"])(
       expect(layout.blueprint.blueprint.description).toMatch(
         /Sulfuric acid \(pipe\)/,
       );
+      inspect(layout);
+      expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({
+        ok: true,
+        errors: [],
+      });
+    }
+  },
+);
+
+test.each(["standard", "compact"])(
+  "%s chemical plants route petroleum gas separately from sulfuric acid in multi-fluid and wrapped lines",
+  (layoutMode) => {
+    const scenarios = [
+      {
+        outputs: [{ recipe: "plastic-bar", rate: 90 }],
+        machineOverrides: { "plastic-bar": { count: 16 } },
+        belt: "fast-transport-belt",
+      },
+      {
+        assembler: "assembling-machine-2",
+        belt: "express-transport-belt",
+        outputs: [{ recipe: "processing-unit", rate: 15 }],
+        machineOverrides: { "plastic-bar": { count: 5 } },
+        fromOre: true,
+      },
+      {
+        spaceAge: true,
+        electronicsMachine: "electromagnetic-plant",
+        belt: "turbo-transport-belt",
+        inputStackSize: 2,
+        outputStackSize: 2,
+        outputs: [{ recipe: "processing-unit", rate: 30 }],
+        fromOre: true,
+      },
+    ];
+    for (const scenario of scenarios) {
+      const layout = build({ ...scenario, layoutMode });
+      const entities = layout.blueprint.blueprint.entities;
+      const chemPlants = entities.filter((e) => e.name === "chemical-plant");
+      expect(chemPlants.length).toBeGreaterThan(0);
+      for (const plant of chemPlants) {
+        expect(plant.recipe).toBe("plastic-bar");
+        expect(plant.direction).toBe(fluidMachineDirection("chemical-plant"));
+      }
+      expect(
+        layout.annotations.some(
+          (a) => a.kind === "input" && a.fluid && a.item === "petroleum-gas",
+        ),
+      ).toBe(true);
+      if (scenario.outputs.some((o) => o.recipe === "processing-unit")) {
+        expect(
+          layout.annotations.some(
+            (a) => a.kind === "input" && a.fluid && a.item === "sulfuric-acid",
+          ),
+        ).toBe(true);
+      }
       inspect(layout);
       expect(validateBlueprintString(encodeBlueprint(layout.blueprint))).toEqual({
         ok: true,

@@ -87,6 +87,7 @@ test("CLI example plans processing units with fluid pipes in both layouts", () =
     assert.match(result.stderr, /passed schema/);
     const blueprint = decodeBlueprint(result.stdout.trim()).blueprint;
     assert.ok(blueprint.entities.some((entity) => entity.recipe === "processing-unit"));
+    assert.ok(blueprint.entities.some((entity) => entity.name === "chemical-plant" && entity.recipe === "plastic-bar"));
     assert.ok(blueprint.entities.some((entity) => entity.name === "pipe"));
     assert.ok(blueprint.entities.some((entity) => entity.name === "pipe-to-ground"));
   }

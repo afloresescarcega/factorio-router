@@ -395,14 +395,21 @@ test("processing units show piped sulfuric acid, pipe legend, and export valid p
   });
   expect(screen.getByLabelText("Sulfuric acid supply limit")).toBeInTheDocument();
   expect(screen.getByText(/Needs 75 fluid\/min/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
+  expect(screen.getByText(/Needs 600 fluid\/min/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Machine for Plastic bar")).toHaveValue("chemical-plant");
+  expect(screen.getAllByText("CP").length).toBeGreaterThan(0);
+  expect(document.querySelector(".legend")).toHaveTextContent("Chemical plant");
   expect(document.querySelector(".legend")).toHaveTextContent("Pipes");
   expect(screen.getByText("Sulfuric acid (pipe)")).toBeInTheDocument();
+  expect(screen.getByText("Petroleum gas (pipe)")).toBeInTheDocument();
 
   // Switching to belts mode keeps fluid inputs in fluid/s instead of belts.
   fireEvent.change(screen.getByLabelText("Rate units"), {
     target: { value: "belts" },
   });
   expect(screen.getByText(/Needs 1.25 fluid\/s/)).toBeInTheDocument();
+  expect(screen.getByText(/Needs 10 fluid\/s/)).toBeInTheDocument();
 
   // Enforces fluid supply limit and recovers when cleared.
   fireEvent.change(screen.getByLabelText("Sulfuric acid supply limit"), {
@@ -417,6 +424,18 @@ test("processing units show piped sulfuric acid, pipe legend, and export valid p
 
   const blueprint = decodeBlueprint(showExport().value).blueprint;
   expect(blueprint.entities.some((e) => e.recipe === "processing-unit")).toBe(true);
+  expect(blueprint.entities.some((e) => e.name === "chemical-plant" && e.recipe === "plastic-bar")).toBe(true);
   expect(blueprint.entities.some((e) => e.name === "pipe")).toBe(true);
   expect(blueprint.entities.some((e) => e.name === "pipe-to-ground")).toBe(true);
+
+  // Supplying plastic externally removes chemical plants and offers a per-item Build in line toggle.
+  const plasticRow = screen.getByRole("row", { name: /Plastic bar/ });
+  fireEvent.click(within(plasticRow).getByRole("button", { name: "Supply externally" }));
+  expect(screen.getByLabelText("Plastic bar supply limit")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Petroleum gas supply limit")).not.toBeInTheDocument();
+  const plasticInputRow = screen.getByLabelText("Plastic bar supply limit").closest(".input-row");
+  fireEvent.click(within(plasticInputRow).getByRole("button", { name: "Build in line" }));
+  expect(screen.queryByLabelText("Plastic bar supply limit")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Petroleum gas supply limit")).toBeInTheDocument();
+  expect(screen.getByLabelText("Machine for Plastic bar")).toHaveValue("chemical-plant");
 });

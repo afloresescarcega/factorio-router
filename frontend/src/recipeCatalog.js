@@ -10,10 +10,11 @@
  * recipes without an explicit energy_required use the 0.5 second default.
  * This subset keeps single-solid-result recipes with up to three ingredients
  * (at most one fluid input and two solid inputs, or up to three solid inputs)
- * in the crafting, crafting-with-fluid, electronics, electronics-with-fluid,
- * pressing, and smelting categories supported by MACHINES below.
- * Dependencies that are outside this subset (for example plastic-bar,
- * explosives, and sulfuric-acid) are kept as their vanilla item or fluid names.
+ * in the chemistry, crafting, crafting-with-fluid, electronics,
+ * electronics-with-fluid, pressing, and smelting categories supported by
+ * MACHINES below.
+ * Dependencies that are outside this subset (for example explosives and
+ * sulfuric-acid) are kept as their vanilla item or fluid names.
  */
 
 export const RECIPES = [
@@ -89,6 +90,18 @@ export const RECIPES = [
       { name: 'copper-cable', amount: 3 },
     ],
     results: [{ name: 'electronic-circuit', amount: 1 }],
+  },
+  {
+    id: 'plastic-bar',
+    name: 'Plastic bar',
+    category: 'chemistry',
+    allowProductivity: true,
+    time: 1,
+    ingredients: [
+      { name: 'coal', amount: 1 },
+      { name: 'petroleum-gas', amount: 20, type: 'fluid' },
+    ],
+    results: [{ name: 'plastic-bar', amount: 2 }],
   },
   {
     id: 'advanced-circuit',
@@ -580,6 +593,14 @@ export const MACHINES = {
     name: 'Electric furnace',
     speed: 2,
     categories: ['smelting'],
+    size: 3,
+    productivity: 0,
+    spaceAge: false,
+  },
+  'chemical-plant': {
+    name: 'Chemical plant',
+    speed: 1,
+    categories: ['chemistry'],
     size: 3,
     productivity: 0,
     spaceAge: false,

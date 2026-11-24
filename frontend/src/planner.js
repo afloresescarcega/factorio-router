@@ -58,6 +58,7 @@ export function factoryFor(recipe, config = {}) {
   const override = config.machineOverrides?.[recipe.id]?.factory;
   if (override) return override;
   if (recipe.category === "smelting") return "electric-furnace";
+  if (recipe.category === "chemistry") return "chemical-plant";
   const electronicsFactory = "electromagnetic-plant";
   if (
     config.spaceAge === true &&
@@ -95,6 +96,7 @@ function positive(value, label, max = 100000) {
 
 function compatibleMachineHint(recipe) {
   if (recipe.category === "smelting") return "an electric furnace";
+  if (recipe.category === "chemistry") return "a chemical plant";
   if (fluidIngredients(recipe).length > 0)
     return "an assembling machine 2 or higher";
   return "an assembling machine";
