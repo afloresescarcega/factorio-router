@@ -165,3 +165,6 @@ cython_debug/
 
 # Claude Code local/personal settings
 .claude/settings.local.json
+
+# Verification evidence from .claude/skills/verify-factorio-router
+/.verify-artifacts/
