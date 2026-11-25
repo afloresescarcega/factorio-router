@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Launch, check, and tear down an isolated Factorio Router dev server for verification.
+#   fr-verify launch            start a Vite server on a free port; prints `export FR_RUN_ID=...`
+#   fr-verify doctor            read-only: is the FR_RUN_ID instance worth driving?
+#   fr-verify drive <journey>   run a Playwright journey against the FR_RUN_ID instance
+#   fr-verify blueprint <file>  decode + schema-validate a blueprint string file
+#   fr-verify cli [args] < in   run frontend/cli.mjs, recording stdin/stdout/stderr/exit code
+#   fr-verify cleanup           stop the FR_RUN_ID server and delete its scratch state (keeps evidence)
+#   fr-verify where             print state dir, evidence dir, URL
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$SKILL_DIR/../../.." && pwd)"
+FRONTEND="$REPO/frontend"
+PY="${FR_PYTHON:-/opt/homebrew/opt/python@3.13/bin/python3.13}"
+STATE_ROOT="${TMPDIR:-/tmp}/fr-verify"
+EVIDENCE_ROOT="$REPO/.verify-artifacts"
+
+die() { echo "fr-verify: $*" >&2; exit 1; }
+need_run() {
+  [[ -n "${FR_RUN_ID:-}" ]] || die "FR_RUN_ID is not set; run \`fr-verify launch\` and eval its export line"
+  STATE="$STATE_ROOT/$FR_RUN_ID"
+  EVIDENCE="$EVIDENCE_ROOT/$FR_RUN_ID"
+  [[ -d "$STATE" ]] || die "no state for run $FR_RUN_ID at $STATE (already cleaned up, or launched from another checkout)"
+  PORT="$(cat "$STATE/port")"; PID="$(cat "$STATE/pid")"; URL="http://127.0.0.1:$PORT/"
+}
+
+cmd_launch() {
+  [[ -x "$FRONTEND/node_modules/.bin/vite" ]] || (cd "$FRONTEND" && npm ci --no-audit --no-fund >/dev/null)
+  local run="${FR_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+  local state="$STATE_ROOT/$run" evidence="$EVIDENCE_ROOT/$run"
+  [[ -e "$state" ]] && die "run $run already has state at $state; pick another FR_RUN_ID or clean it up"
+  mkdir -p "$state" "$evidence"
+  local port; port="$("$PY" -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')"
+  # Run vite's own entry with node so the recorded PID is the server itself, not an npm/npx wrapper.
+  # exec + redirecting the whole subshell keeps $! == vite's PID and frees the caller's stdout.
+  (cd "$FRONTEND" && exec nohup node node_modules/vite/bin/vite.js --host 127.0.0.1 --port "$port" --strictPort) \
+      >"$state/vite.log" 2>&1 </dev/null &
+  echo $! >"$state/pid"
+  echo "$port" >"$state/port"
+  echo "$REPO" >"$state/repo"
+  git -C "$REPO" rev-parse HEAD >"$state/sha"
+  export FR_RUN_ID="$run"; need_run
+  local i
+  for i in $(seq 1 60); do
+    kill -0 "$PID" 2>/dev/null || { cat "$state/vite.log" >&2; die "vite exited during startup"; }
+    grep -q "Local:" "$state/vite.log" && curl -fsS "$URL" >/dev/null 2>&1 && break
+    sleep 0.5
+  done
+  grep -q "Local:" "$state/vite.log" || die "vite not ready after 30s; see $state/vite.log"
+  # Ready means usable: the React app must render a layout, not just serve HTML.
+  "$PY" "$SKILL_DIR/scripts/drive.py" --check --url "$URL" --out "$evidence/launch-check" \
+    || die "server answers but the app did not render; see $evidence/launch-check/console.log"
+  echo "ready: $URL (pid $PID, run $run)"
+  echo "export FR_RUN_ID=$run"
+}
+
+cmd_doctor() {
+  need_run
+  local ok=1
+  check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; ok=0; fi; }
+  check "process $PID alive" 'kill -0 "$PID" 2>/dev/null'
+  check "port $PORT owned by pid $PID" 'lsof -nP -a -p "$PID" -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1'
+  check "instance serves this checkout ($REPO)" '[[ "$(cat "$STATE/repo")" == "$REPO" ]]'
+  check "HTML title is Factorio Router" 'curl -fsS "$URL" | grep -q "<title>Factorio Router</title>"'
+  local launched head; launched="$(cat "$STATE/sha")"; head="$(git -C "$REPO" rev-parse HEAD)"
+  echo "info launched at ${launched:0:12}, HEAD ${head:0:12}, dirty files: $(git -C "$REPO" status --porcelain | grep -vc '^?? .verify-artifacts' || true) (vite serves the working tree live)"
+  check "app renders a ready layout" '"$PY" "$SKILL_DIR/scripts/drive.py" --check --url "$URL" --out "$STATE/doctor" >/dev/null'
+  echo "url  $URL"; echo "evidence $EVIDENCE"
+  [[ $ok == 1 ]] || exit 1
+}
+
+cmd_drive() {
+  need_run
+  [[ $# -ge 1 ]] || die "usage: fr-verify drive <journey.py>"
+  local journey="$1"; [[ -f "$journey" ]] || journey="$SKILL_DIR/journeys/$1"
+  [[ -f "$journey" ]] || die "journey not found: $1"
+  local name; name="$(basename "$journey" .py)"
+  "$PY" "$SKILL_DIR/scripts/drive.py" --url "$URL" --out "$EVIDENCE/$name" "$journey"
+}
+
+cmd_blueprint() {
+  [[ $# -eq 1 ]] || die "usage: fr-verify blueprint <file-with-blueprint-string>"
+  node "$SKILL_DIR/scripts/check-blueprint.mjs" "$1"
+}
+
+cmd_cli() {
+  need_run
+  local dir="$EVIDENCE/cli-$(date +%H%M%S)"; mkdir -p "$dir"
+  cat >"$dir/stdin.txt"
+  printf '%q ' node cli.mjs "$@" >"$dir/command.txt"; echo >>"$dir/command.txt"
+  set +e
+  (cd "$FRONTEND" && node cli.mjs "$@" <"$dir/stdin.txt" >"$dir/stdout.txt" 2>"$dir/stderr.txt")
+  local code=$?; set -e
+  echo "$code" >"$dir/exit-code.txt"
+  echo "cli exit $code; transcript in $dir"; cat "$dir/stderr.txt" >&2
+  return "$code"
+}
+
+cmd_cleanup() {
+  need_run
+  if kill -0 "$PID" 2>/dev/null; then
+    kill "$PID"; for _ in $(seq 1 20); do kill -0 "$PID" 2>/dev/null || break; sleep 0.25; done
+    kill -0 "$PID" 2>/dev/null && kill -9 "$PID"
+  fi
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 && echo "warning: something else now listens on $PORT (not ours, left alone)" >&2
+  cp "$STATE/vite.log" "$EVIDENCE/vite.log" 2>/dev/null || true
+  rm -rf "$STATE"
+  echo "stopped run $FR_RUN_ID; evidence kept at $EVIDENCE"
+}
+
+cmd_where() { need_run; echo "state    $STATE"; echo "evidence $EVIDENCE"; echo "url      $URL"; }
+
+sub="${1:-}"; shift || true
+case "$sub" in
+  launch|doctor|drive|blueprint|cli|cleanup|where) "cmd_$sub" "$@" ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
+esac
