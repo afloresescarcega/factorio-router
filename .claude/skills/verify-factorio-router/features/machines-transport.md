@@ -29,11 +29,11 @@ Preconditions:
 - **Belts.** `get_by_role("combobox", name=re.compile(r"^Belts")).select_option("fast-transport-belt")`; the blueprint's belts become `fast-transport-belt`. `turbo-transport-belt` is only an option while Space Age is on.
 - **Budget.** Fill `Machine budget` with `3`; wait for `Check constraints` and an `alert`. Restore `200`.
 - **Ore.** Check `Include electric smelting from ore`; inputs become ores and `Electric furnace` rows appear in the production table.
-- **Compact.** Record the `Footprint: W × H tiles` text, check `Compact layout`, wait for the footprint text to change, and record it again. Machine count stays the same.
+- **Compact.** Record the `Footprint: W × H tiles` text, check `Compact layout`, wait for the footprint text to change, and record it again. On the default line it goes from `44 × 40` to `20 × 20`; the `machines` metric stays `6`.
 
 ## Gotchas
 
 - `Belts` has no exact accessible name (the label wraps the select, so the name includes option text). Use the `^Belts` regex.
 - Unchecking Space Age resets the belt to `Yellow belt` and both stack heights to 1, converting rates to match. Re-select the belt after toggling Space Age off.
-- On the default line, compact is not smaller (standard `45 × 39` vs compact `44 × 40` on one probe). Use a bigger line such as 84 splitters/min from ore with assembling machine 3 and blue belts to show a large reduction; assert only that the footprint changes and machine count is preserved.
+- On a fresh default line (commit 82dcdd1) the footprint is `44 × 40 tiles` standard and `20 × 20 tiles` compact, with 6 machines in both. Measure from a fresh page: toggling Space Age, stacking, or belts first changes the standard footprint (one earlier probe read `45 × 39` after those changes). Assert that compact is smaller and the machine count is unchanged, not the literal sizes, unless the task is about layout size.
 - Changing `Default assembler` clears machine overrides from the production table.

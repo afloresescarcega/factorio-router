@@ -22,7 +22,7 @@ Preconditions:
 
 - Default line, status chip `Layout ready`.
 
-- **Shipped journey.** Run `fr-verify drive export-blueprint.py`. It passes 12 checks on the default line (211 entities, footprint `44 × 40 tiles` at commit f87f3e6).
+- **Shipped journey.** Run `fr-verify drive export-blueprint.py`. It passes 12 checks on the default line (211 entities, standard footprint `44 × 40 tiles` with `Compact layout` off, at commit 82dcdd1).
 - **Preview.** Read the `entities` metric, then `expect(page.get_by_role("img", name=f"Blueprint with {n} entities")).to_have_count(1)`. Click `Zoom in`; the img `style` contains `150%`. Click `Fit`; it returns to `100%`.
 - **Build list.** Click `get_by_role("tab", name="Build list")`; its `aria-selected` is `true` and `.materials-list > div` rows hold name/count pairs.
 - **Keyboard tabs.** Focus the `Layout` tab and press `ArrowRight`; `Build list` becomes selected.
