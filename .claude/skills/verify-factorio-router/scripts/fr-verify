@@ -51,7 +51,7 @@ echo 'fr-verify: launch of run $run failed; server stopped, evidence in $evidenc
     grep -q "Local:" "$state/vite.log" && curl -fsS "$URL" >/dev/null 2>&1 && break
     sleep 0.5
   done
-  grep -q "Local:" "$state/vite.log" || die "vite not ready after 30s; see $state/vite.log"
+  grep -q "Local:" "$state/vite.log" || die "vite not ready after 30s; see $evidence/vite.log"
   # Ready means usable: the React app must render a layout, not just serve HTML.
   "$PY" "$SKILL_DIR/scripts/drive.py" --check --url "$URL" --out "$evidence/launch-check" \
     || die "server answers but the app did not render; see $evidence/launch-check/console.log"
