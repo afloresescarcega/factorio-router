@@ -37,6 +37,10 @@ cmd_launch() {
   (cd "$FRONTEND" && exec nohup node node_modules/vite/bin/vite.js --host 127.0.0.1 --port "$port" --strictPort) \
       >"$state/vite.log" 2>&1 </dev/null &
   echo $! >"$state/pid"
+  # Any failure from here on stops the server we just started; vite.log is kept as evidence.
+  local q_state q_evidence; q_state="$(printf %q "$state")"; q_evidence="$(printf %q "$evidence")"
+  trap "kill $! 2>/dev/null || true; cp $q_state/vite.log $q_evidence/ 2>/dev/null || true; rm -rf $q_state; \
+echo 'fr-verify: launch of run $run failed; server stopped, evidence in $evidence' >&2" EXIT
   echo "$port" >"$state/port"
   echo "$REPO" >"$state/repo"
   git -C "$REPO" rev-parse HEAD >"$state/sha"
@@ -51,6 +55,7 @@ cmd_launch() {
   # Ready means usable: the React app must render a layout, not just serve HTML.
   "$PY" "$SKILL_DIR/scripts/drive.py" --check --url "$URL" --out "$evidence/launch-check" \
     || die "server answers but the app did not render; see $evidence/launch-check/console.log"
+  trap - EXIT
   echo "ready: $URL (pid $PID, run $run)"
   echo "export FR_RUN_ID=$run"
 }
